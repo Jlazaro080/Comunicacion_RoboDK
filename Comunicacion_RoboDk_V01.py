@@ -3,7 +3,9 @@ import sys
 import difflib
 import csv
 import os
+import re
 import threading
+import tkinter as tk
 from datetime import datetime
 from robodk import robolink
 
@@ -34,8 +36,12 @@ VERIFICATION_DWELL_S = 0.0
 RUN_R2_IN_BACKGROUND = True
 OP70_HANDSHAKE_TIMEOUT_S = 300.0
 OP70_HANDSHAKE_POLL_S = 0.1
+R2_START_ACK_TIMEOUT_S = 2.0
+R2_START_ACK_POLL_S = 0.02
 R1_SEQUENCE_CYCLES = 3  # 0 = infinito (R1 vuelve a Op_00 tras terminar Op_70)
 OP_30_OPERATION_OPTION = os.getenv('OP30_OPTION', 'A').strip().upper()  # Opciones: 'A', 'B'
+ENABLE_STATUS_UI = True
+STATUS_UI_REFRESH_MS = 300
 MONITOR_ONLY_ACTIVE_OP30_FRAME = True
 FORCE_VISIBLE_TEST_MOVE = False
 R1_OP_00_LINEAR_SPEED_MM_S = 500
@@ -433,10 +439,13 @@ def execute_r2_operations_sequence_worker(state, robot, operation_sequence, time
     if cycle_label is None:
       cycle_label = state.get('dispatched_cycles', 0) + 1
 
+    update_runtime_machine('R2', status='EN_PROCESO', operation='Inicio secuencia', cycle=cycle_label)
+
     for operation in operation_sequence:
       op_name = operation['op_name']
       state['current_op_name'] = op_name
       state['op70_busy'] = op_name == 'Op_70'
+      update_runtime_machine('R2', status='EN_PROCESO', operation=op_name, cycle=cycle_label)
       frame_item = operation['frame']
       target_afuera = operation['target_afuera']
       target_dentro = operation['target_dentro']
@@ -461,11 +470,14 @@ def execute_r2_operations_sequence_worker(state, robot, operation_sequence, time
       execute_robot_step_with_speed(robot, f'R2 -> {op_name}_Pos_Afuera (MoveL)', 'L', target_afuera, linear_speed_mm_s, joint_speed_deg_s)
 
       op_python_end = worker_timer()
+      op_elapsed_s = op_python_end - op_python_start
+      add_runtime_machine_time('R2', op_elapsed_s)
+      add_runtime_cycle_time('R2', cycle_label, op_elapsed_s)
       if metrics is not None:
         register_timing_metric(
           metrics,
           f'R2 Operación {op_name} - ciclo {cycle_label}',
-          op_python_end - op_python_start,
+          op_elapsed_s,
           None,
           metrics_lock,
         )
@@ -476,10 +488,12 @@ def execute_r2_operations_sequence_worker(state, robot, operation_sequence, time
     state['completed_cycles'] = state.get('completed_cycles', 0) + 1
     state['current_op_name'] = None
     state['op70_busy'] = False
+    update_runtime_machine('R2', status='SIN OPERACIÓN', operation='-', cycle=cycle_label)
   except Exception as error:
     state['current_op_name'] = None
     state['op70_busy'] = False
     state['error'] = error
+    update_runtime_machine('R2', status='ERROR', operation=str(error), cycle=cycle_label)
 
 
 def execute_r2_operations_sequence_worker_background(state, robot_name, operation_sequence, timer_func=None, metrics=None, metrics_lock=None, cycle_id=None):
@@ -584,7 +598,222 @@ def print_frame_stability_report(before_snapshots, after_snapshots):
       print(f"{frame_name}: CAMBIÓ")
 
 
+RUNTIME_STATUS = None
+
+
+def build_runtime_status():
+  return {
+    'lock': threading.Lock(),
+    'started_at': time.time(),
+    'global_status': 'INICIALIZANDO',
+    'R1': {
+      'status': 'SIN OPERACIÓN',
+      'operation': '-',
+      'cycle': 0,
+      'last_cycle_s': 0.0,
+      'total_s': 0.0,
+      'cycle_totals': {},
+    },
+    'R2': {
+      'status': 'SIN OPERACIÓN',
+      'operation': '-',
+      'cycle': 0,
+      'last_cycle_s': 0.0,
+      'total_s': 0.0,
+      'cycle_totals': {},
+    },
+  }
+
+
+def update_runtime_machine(machine_name, status=None, operation=None, cycle=None):
+  if RUNTIME_STATUS is None:
+    return
+
+  with RUNTIME_STATUS['lock']:
+    machine_data = RUNTIME_STATUS.get(machine_name)
+    if machine_data is None:
+      return
+    if status is not None:
+      machine_data['status'] = status
+    if operation is not None:
+      machine_data['operation'] = operation
+    if cycle is not None:
+      machine_data['cycle'] = cycle
+
+
+def add_runtime_machine_time(machine_name, elapsed_s):
+  if RUNTIME_STATUS is None:
+    return
+
+  with RUNTIME_STATUS['lock']:
+    machine_data = RUNTIME_STATUS.get(machine_name)
+    if machine_data is None:
+      return
+    machine_data['total_s'] = machine_data.get('total_s', 0.0) + float(elapsed_s)
+
+
+def add_runtime_cycle_time(machine_name, cycle_number, elapsed_s):
+  if RUNTIME_STATUS is None or cycle_number is None:
+    return
+
+  with RUNTIME_STATUS['lock']:
+    machine_data = RUNTIME_STATUS.get(machine_name)
+    if machine_data is None:
+      return
+
+    cycle_totals = machine_data.get('cycle_totals', {})
+    current_cycle_s = cycle_totals.get(cycle_number, 0.0) + float(elapsed_s)
+    cycle_totals[cycle_number] = current_cycle_s
+    machine_data['cycle_totals'] = cycle_totals
+    machine_data['last_cycle_s'] = current_cycle_s
+    machine_data['cycle'] = cycle_number
+
+
+def set_runtime_cycle_total(machine_name, cycle_number, total_s):
+  if RUNTIME_STATUS is None:
+    return
+
+  with RUNTIME_STATUS['lock']:
+    machine_data = RUNTIME_STATUS.get(machine_name)
+    if machine_data is None:
+      return
+    machine_data['cycle_totals'][cycle_number] = float(total_s)
+    machine_data['last_cycle_s'] = float(total_s)
+    machine_data['cycle'] = cycle_number
+
+
+def set_runtime_global_status(global_status):
+  if RUNTIME_STATUS is None:
+    return
+
+  with RUNTIME_STATUS['lock']:
+    RUNTIME_STATUS['global_status'] = global_status
+
+
+def get_runtime_snapshot():
+  if RUNTIME_STATUS is None:
+    return None
+
+  with RUNTIME_STATUS['lock']:
+    now_ts = time.time()
+    elapsed_s = now_ts - RUNTIME_STATUS.get('started_at', now_ts)
+    return {
+      'elapsed_s': elapsed_s,
+      'global_status': RUNTIME_STATUS.get('global_status', 'N/D'),
+      'R1': {
+        'status': RUNTIME_STATUS['R1']['status'],
+        'operation': RUNTIME_STATUS['R1']['operation'],
+        'cycle': RUNTIME_STATUS['R1']['cycle'],
+        'last_cycle_s': RUNTIME_STATUS['R1']['last_cycle_s'],
+        'total_s': RUNTIME_STATUS['R1']['total_s'],
+      },
+      'R2': {
+        'status': RUNTIME_STATUS['R2']['status'],
+        'operation': RUNTIME_STATUS['R2']['operation'],
+        'cycle': RUNTIME_STATUS['R2']['cycle'],
+        'last_cycle_s': RUNTIME_STATUS['R2']['last_cycle_s'],
+        'total_s': RUNTIME_STATUS['R2']['total_s'],
+      },
+    }
+
+
+class RuntimeStatusDashboard:
+  def __init__(self, refresh_ms=300):
+    self.refresh_ms = refresh_ms
+    self.thread = None
+    self.root = None
+    self.stop_event = threading.Event()
+
+  def _status_colors(self, status_text):
+    normalized_status = '' if status_text is None else str(status_text).strip().upper()
+    if normalized_status == 'EN_PROCESO':
+      return ('#0B6623', 'white')
+    if normalized_status == 'ESPERA':
+      return ('#B8860B', 'white')
+    if normalized_status == 'ERROR':
+      return ('#8B0000', 'white')
+    return ('#444444', 'white')
+
+  def start(self):
+    if not ENABLE_STATUS_UI:
+      return
+    self.thread = threading.Thread(target=self._run_ui, daemon=True)
+    self.thread.start()
+
+  def stop(self):
+    self.stop_event.set()
+    if self.root is not None:
+      try:
+        self.root.after(0, self.root.destroy)
+      except Exception:
+        pass
+
+  def _run_ui(self):
+    try:
+      self.root = tk.Tk()
+      self.root.title('Estado RoboDK - R1/R2')
+      self.root.geometry('700x300')
+
+      tk.Label(self.root, text='Monitoreo de estado y tiempos', font=('Segoe UI', 12, 'bold')).pack(pady=(10, 6))
+      self.global_var = tk.StringVar(value='Estado global: INICIALIZANDO')
+      self.elapsed_var = tk.StringVar(value='Tiempo de ejecución: 0.0 s (0.00 min)')
+      tk.Label(self.root, textvariable=self.global_var, anchor='w').pack(fill='x', padx=14)
+      tk.Label(self.root, textvariable=self.elapsed_var, anchor='w').pack(fill='x', padx=14, pady=(0, 8))
+
+      self.r1_var = tk.StringVar(value='R1 | Estado: SIN OPERACIÓN | Op: - | Ciclo: 0 | Pieza: 0.000 s (0.000 min) | Total: 0.000 s (0.000 min)')
+      self.r2_var = tk.StringVar(value='R2 | Estado: SIN OPERACIÓN | Op: - | Ciclo: 0 | Pieza: 0.000 s (0.000 min) | Total: 0.000 s (0.000 min)')
+
+      self.r1_label = tk.Label(self.root, textvariable=self.r1_var, anchor='w', font=('Consolas', 10), relief='groove', padx=6, pady=4)
+      self.r1_label.pack(fill='x', padx=14, pady=(0, 6))
+      self.r2_label = tk.Label(self.root, textvariable=self.r2_var, anchor='w', font=('Consolas', 10), relief='groove', padx=6, pady=4)
+      self.r2_label.pack(fill='x', padx=14)
+      tk.Label(
+        self.root,
+        text='Pieza = tiempo del ciclo/pieza actual por máquina. Total = tiempo acumulado de la máquina.',
+        anchor='w',
+        font=('Segoe UI', 9, 'italic'),
+      ).pack(fill='x', padx=14, pady=(10, 0))
+
+      self.root.protocol('WM_DELETE_WINDOW', self.stop)
+      self._refresh()
+      self.root.mainloop()
+    except Exception as ui_error:
+      print(f"Aviso: no se pudo iniciar la interfaz de estado: {ui_error}")
+
+  def _refresh(self):
+    if self.stop_event.is_set() or self.root is None:
+      return
+
+    snapshot = get_runtime_snapshot()
+    if snapshot is not None:
+      elapsed_s = snapshot['elapsed_s']
+      elapsed_min = elapsed_s / 60.0
+      self.global_var.set(f"Estado global: {snapshot['global_status']}")
+      self.elapsed_var.set(f"Tiempo de ejecución: {elapsed_s:.1f} s ({elapsed_min:.2f} min)")
+
+      for machine_name, ui_var in (('R1', self.r1_var), ('R2', self.r2_var)):
+        machine = snapshot[machine_name]
+        piece_s = machine['last_cycle_s']
+        total_s = machine['total_s']
+        bg_color, fg_color = self._status_colors(machine['status'])
+        ui_var.set(
+          f"{machine_name} | Estado: {machine['status']} | Op: {machine['operation']} | Ciclo: {machine['cycle']} | "
+          f"Pieza: {piece_s:.3f} s ({piece_s / 60.0:.3f} min) | Total: {total_s:.3f} s ({total_s / 60.0:.3f} min)"
+        )
+
+        if machine_name == 'R1':
+          self.r1_label.config(bg=bg_color, fg=fg_color)
+        else:
+          self.r2_label.config(bg=bg_color, fg=fg_color)
+
+    self.root.after(self.refresh_ms, self._refresh)
+
+
 def run_timed_block(label, rdk, timer_func, metrics, block_function):
+  machine_name, activity_name = classify_timing_label(label)
+  if machine_name in ('R1', 'R2'):
+    update_runtime_machine(machine_name, status='EN_PROCESO', operation=activity_name)
+
   python_start = timer_func()
   robodk_start = get_robodk_sim_time(rdk)
 
@@ -603,6 +832,29 @@ def run_timed_block(label, rdk, timer_func, metrics, block_function):
     'robodk_s': robodk_seconds,
   }
 
+  if machine_name in ('R1', 'R2'):
+    add_runtime_machine_time(machine_name, python_seconds)
+    update_runtime_machine(machine_name, status='SIN OPERACIÓN', operation='-')
+
+
+def calculate_r2_cycle_totals(metrics):
+  r2_cycle_totals = {}
+  for label, data in metrics.items():
+    match = re.match(r'^R2 Operación .* - ciclo (\d+)$', str(label))
+    if match is None:
+      continue
+
+    cycle_number = int(match.group(1))
+    python_seconds = data.get('python_s', 0.0)
+    if python_seconds is None:
+      python_seconds = 0.0
+
+    if cycle_number not in r2_cycle_totals:
+      r2_cycle_totals[cycle_number] = 0.0
+    r2_cycle_totals[cycle_number] = r2_cycle_totals[cycle_number] + float(python_seconds)
+
+  return r2_cycle_totals
+
 
 def print_timing_summary(metrics, total_python_s, total_robodk_s, r1_cycles=0, r2_cycles=0):
   print("\n=== Resumen de tiempos ===")
@@ -620,23 +872,169 @@ def print_timing_summary(metrics, total_python_s, total_robodk_s, r1_cycles=0, r
   else:
     delta_total_s = total_python_s - total_robodk_s
     print(f"TOTAL: Python={total_python_s:.3f}s | RoboDK={total_robodk_s:.3f}s | Delta={delta_total_s:.3f}s")
+
+  r2_cycle_totals = calculate_r2_cycle_totals(metrics)
+  if len(r2_cycle_totals) > 0:
+    total_r2_python_s = sum(r2_cycle_totals.values())
+    total_r2_python_min = total_r2_python_s / 60.0
+    print(f"TOTAL R2: Python={total_r2_python_s:.3f}s ({total_r2_python_min:.3f} min)")
+    for cycle_number in sorted(r2_cycle_totals.keys()):
+      cycle_python_s = r2_cycle_totals[cycle_number]
+      cycle_python_min = cycle_python_s / 60.0
+      print(f"TOTAL CICLO R2 #{cycle_number}: {cycle_python_s:.3f}s ({cycle_python_min:.3f} min)")
+
   print(f"Ciclos completados: R1={r1_cycles} | R2={r2_cycles}")
 
 
-def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file, r1_cycles=0, r2_cycles=0):
+TIMES_CSV_FIELDNAMES = ['timestamp', 'robot', 'activity', 'python_s', 'robodk_s', 'delta_s', 'python_min', 'r1_cycles', 'r2_cycles']
+
+
+def classify_timing_label(label):
+  if label is None:
+    return ('', '')
+
+  normalized_label = str(label).strip()
+  if normalized_label == '':
+    return ('', '')
+
+  if normalized_label == 'TOTAL':
+    return ('GLOBAL', 'TOTAL')
+
+  if normalized_label.startswith('TOTAL_CICLO_R1_'):
+    return ('R1', normalized_label)
+
+  if normalized_label.startswith('R2 '):
+    return ('R2', normalized_label[3:].strip())
+
+  if normalized_label.startswith('R1 '):
+    return ('R1', normalized_label[3:].strip())
+
+  if 'R2' in normalized_label and 'R1' not in normalized_label:
+    return ('R2', normalized_label)
+
+  if 'R1' in normalized_label and 'R2' not in normalized_label:
+    return ('R1', normalized_label)
+
+  return ('R1', normalized_label)
+
+
+def normalize_timing_activity_name(activity_name):
+  normalized_activity = '' if activity_name is None else str(activity_name).strip()
+  if normalized_activity.startswith('Estación '):
+    return f"Operación {normalized_activity[len('Estación '):].strip()}"
+  return normalized_activity
+
+
+def normalize_timing_csv_row(raw_row):
+  label = (raw_row.get('activity', '') or raw_row.get('section', '')).strip()
+  inferred_robot, inferred_activity = classify_timing_label(label)
+  robot_value = (raw_row.get('robot', '') or inferred_robot).strip()
+  raw_activity_value = (raw_row.get('activity', '') or inferred_activity).strip()
+  activity_value = normalize_timing_activity_name(raw_activity_value)
+
+  return {
+    'timestamp': (raw_row.get('timestamp', '') or '').strip(),
+    'robot': robot_value,
+    'activity': activity_value,
+    'python_s': (raw_row.get('python_s', '') or '').strip(),
+    'robodk_s': (raw_row.get('robodk_s', '') or '').strip(),
+    'delta_s': (raw_row.get('delta_s', '') or '').strip(),
+    'python_min': (raw_row.get('python_min', '') or '').strip(),
+    'r1_cycles': (raw_row.get('r1_cycles', '') or '').strip(),
+    'r2_cycles': (raw_row.get('r2_cycles', '') or '').strip(),
+  }
+
+
+def ensure_timing_csv_schema(csv_file):
+  try:
+    with open(csv_file, 'r', newline='', encoding='utf-8') as csv_handle:
+      reader = csv.DictReader(csv_handle)
+      existing_fieldnames = reader.fieldnames
+      existing_rows = [normalize_timing_csv_row(row) for row in reader]
+
+      if existing_fieldnames == TIMES_CSV_FIELDNAMES:
+        requires_activity_normalization = any(
+          row['activity'].startswith('Estación ') for row in existing_rows
+        )
+        if not requires_activity_normalization:
+          return
+  except FileNotFoundError:
+    return
+
+  with open(csv_file, 'w', newline='', encoding='utf-8') as csv_handle:
+    writer = csv.DictWriter(csv_handle, fieldnames=TIMES_CSV_FIELDNAMES)
+    writer.writeheader()
+    if existing_rows:
+      writer.writerows(existing_rows)
+
+  print(f"CSV de tiempos migrado a nuevo formato: {csv_file}")
+
+
+def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file, r1_cycles=0, r2_cycles=0, cycle_totals=None):
   timestamp = datetime.now().isoformat(timespec='seconds')
   rows = []
+  r2_cycle_totals = calculate_r2_cycle_totals(metrics)
 
   for label, data in metrics.items():
     python_s = data['python_s']
     robodk_s = data['robodk_s']
     delta_s = None if robodk_s is None else python_s - robodk_s
+    robot_label, activity_label = classify_timing_label(label)
     rows.append({
       'timestamp': timestamp,
-      'section': label,
+      'robot': robot_label,
+      'activity': activity_label,
       'python_s': f"{python_s:.6f}",
       'robodk_s': '' if robodk_s is None else f"{robodk_s:.6f}",
       'delta_s': '' if delta_s is None else f"{delta_s:.6f}",
+      'python_min': '',
+      'r1_cycles': str(r1_cycles),
+      'r2_cycles': str(r2_cycles),
+    })
+
+  if cycle_totals is not None:
+    for cycle_data in cycle_totals:
+      cycle_number = cycle_data['cycle']
+      python_cycle_s = cycle_data['python_s']
+      python_cycle_min = python_cycle_s / 60.0
+      rows.append({
+        'timestamp': timestamp,
+        'robot': 'R1',
+        'activity': f'TOTAL_CICLO_R1_{cycle_number}',
+        'python_s': f"{python_cycle_s:.6f}",
+        'robodk_s': '',
+        'delta_s': '',
+        'python_min': f"{python_cycle_min:.6f}",
+        'r1_cycles': str(r1_cycles),
+        'r2_cycles': str(r2_cycles),
+      })
+
+  if len(r2_cycle_totals) > 0:
+    for cycle_number in sorted(r2_cycle_totals.keys()):
+      python_cycle_s = r2_cycle_totals[cycle_number]
+      python_cycle_min = python_cycle_s / 60.0
+      rows.append({
+        'timestamp': timestamp,
+        'robot': 'R2',
+        'activity': f'TOTAL_CICLO_R2_{cycle_number}',
+        'python_s': f"{python_cycle_s:.6f}",
+        'robodk_s': '',
+        'delta_s': '',
+        'python_min': f"{python_cycle_min:.6f}",
+        'r1_cycles': str(r1_cycles),
+        'r2_cycles': str(r2_cycles),
+      })
+
+    total_r2_python_s = sum(r2_cycle_totals.values())
+    total_r2_python_min = total_r2_python_s / 60.0
+    rows.append({
+      'timestamp': timestamp,
+      'robot': 'R2',
+      'activity': 'TOTAL_R2',
+      'python_s': f"{total_r2_python_s:.6f}",
+      'robodk_s': '',
+      'delta_s': '',
+      'python_min': f"{total_r2_python_min:.6f}",
       'r1_cycles': str(r1_cycles),
       'r2_cycles': str(r2_cycles),
     })
@@ -644,13 +1042,17 @@ def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file,
   total_delta_s = None if total_robodk_s is None else total_python_s - total_robodk_s
   rows.append({
     'timestamp': timestamp,
-    'section': 'TOTAL',
+    'robot': 'GLOBAL',
+    'activity': 'TOTAL',
     'python_s': f"{total_python_s:.6f}",
     'robodk_s': '' if total_robodk_s is None else f"{total_robodk_s:.6f}",
     'delta_s': '' if total_delta_s is None else f"{total_delta_s:.6f}",
+    'python_min': '',
     'r1_cycles': str(r1_cycles),
     'r2_cycles': str(r2_cycles),
   })
+
+  ensure_timing_csv_schema(csv_file)
 
   file_exists = False
   try:
@@ -660,7 +1062,7 @@ def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file,
     file_exists = False
 
   with open(csv_file, 'a', newline='', encoding='utf-8') as csv_handle:
-    writer = csv.DictWriter(csv_handle, fieldnames=['timestamp', 'section', 'python_s', 'robodk_s', 'delta_s', 'r1_cycles', 'r2_cycles'])
+    writer = csv.DictWriter(csv_handle, fieldnames=TIMES_CSV_FIELDNAMES)
     if not file_exists:
       writer.writeheader()
     writer.writerows(rows)
@@ -675,6 +1077,10 @@ else:
 
 
 start_time = timer()
+RUNTIME_STATUS = build_runtime_status()
+status_dashboard = RuntimeStatusDashboard(refresh_ms=STATUS_UI_REFRESH_MS)
+status_dashboard.start()
+set_runtime_global_status('CONECTANDO_ROBODK')
 
 # Link to RoboDK
 RDK = robolink.Robolink()
@@ -690,6 +1096,9 @@ except Exception:
 
 robotR1 = get_item_or_raise(RDK, 'R1')
 robotR2 = get_item_or_raise(RDK, 'R2')
+set_runtime_global_status('LISTO')
+update_runtime_machine('R1', status='SIN OPERACIÓN', operation='-', cycle=0)
+update_runtime_machine('R2', status='SIN OPERACIÓN', operation='-', cycle=0)
 
 # Posicion HOME
 RDK_R1_Home_General = get_first_valid_or_raise(RDK, ['R1_Home_Gral', 'R1_Home_gral'])
@@ -1122,7 +1531,9 @@ if run_ops_sequences and RUN_NOK_SEQUENCE and STRICT_NOK_REQUIRED and not sequen
   raise Exception(f"Secuencia NOK estricta: faltan elementos NOK: {missing_nok_items}")
 
 try:
+  set_runtime_global_status('EJECUTANDO')
   section_times = {}
+  cycle_totals = []
   section_times_lock = threading.Lock()
   r1_completed_cycles = 0
   r2_sequence_state = {
@@ -1207,6 +1618,8 @@ try:
     while True:
       cycle_number = cycle_number + 1
       r1_completed_cycles = cycle_number
+      cycle_python_start = timer()
+      update_runtime_machine('R1', status='EN_PROCESO', operation='Inicio ciclo', cycle=cycle_number)
       print(f"\n=== Ciclo R1 #{cycle_number} ===")
 
       #############################Movimientos Robot 1
@@ -1366,6 +1779,7 @@ try:
           running_thread = r2_sequence_state['thread']
           if running_thread is not None and running_thread.is_alive() and r2_sequence_state.get('op70_busy', False):
             print("R1 llegó a Op_70 y espera: R2 aún está en zona Op_70.")
+            update_runtime_machine('R1', status='ESPERA', operation='Esperando liberación Op_70', cycle=cycle_number)
             wait_r1_start = timer()
             while running_thread.is_alive() and r2_sequence_state.get('op70_busy', False):
               if r2_sequence_state['error'] is not None:
@@ -1375,6 +1789,7 @@ try:
                   "Timeout de control Op_70: R1 esperó a que R2 liberara la zona Op_70."
                 )
               time.sleep(OP70_HANDSHAKE_POLL_S)
+            update_runtime_machine('R1', status='EN_PROCESO', operation='Op_70', cycle=cycle_number)
 
           running_thread = r2_sequence_state['thread']
           if running_thread is not None and not running_thread.is_alive():
@@ -1544,10 +1959,12 @@ try:
               queued_cycle = r2_sequence_state.get('requested_cycles', 0) + 1
               r2_sequence_state['requested_cycles'] = queued_cycle
               running_thread = r2_sequence_state.get('thread')
+              worker_was_idle = running_thread is None or not running_thread.is_alive()
 
             print(f"R2 encola ciclo solicitado desde Op_70 (cola ciclo {queued_cycle}).")
+            update_runtime_machine('R2', status='ESPERA', operation=f'Cola pendiente ciclo {queued_cycle}', cycle=queued_cycle)
 
-            if running_thread is None or not running_thread.is_alive():
+            if worker_was_idle:
               print("Iniciando worker de R2 para consumir ciclos en cola.")
               r2_thread = threading.Thread(
                 target=execute_r2_operations_sequence_worker_background,
@@ -1564,6 +1981,23 @@ try:
               with r2_sequence_state['state_lock']:
                 r2_sequence_state['thread'] = r2_thread
               r2_thread.start()
+
+              start_ack_t0 = timer()
+              while True:
+                with r2_sequence_state['state_lock']:
+                  started_cycles = r2_sequence_state.get('started_cycles', 0)
+                  current_op_name = r2_sequence_state.get('current_op_name')
+
+                if started_cycles >= queued_cycle and current_op_name == 'Op_70':
+                  print(f"R2 inició Op_70 para ciclo {queued_cycle} justo después de liberar estación.")
+                  break
+
+                if (timer() - start_ack_t0) > R2_START_ACK_TIMEOUT_S:
+                  print(
+                    f"Aviso: R2 ciclo {queued_cycle} no confirmó inicio inmediato de Op_70 en {R2_START_ACK_TIMEOUT_S:.2f}s."
+                  )
+                  break
+                time.sleep(R2_START_ACK_POLL_S)
             else:
               print(
                 f"R2 sigue ejecutando ciclo en curso ({r2_sequence_state.get('current_op_name', 'N/D')}). Solicitud en cola registrada."
@@ -1604,6 +2038,16 @@ try:
           )
       elif RUN_OP_70_SEQUENCE:
         print("Secuencia Op_70 omitida: faltan frame/targets en esta operación.")
+
+      cycle_python_end = timer()
+      cycle_python_s = cycle_python_end - cycle_python_start
+      cycle_python_min = cycle_python_s / 60.0
+      cycle_totals.append({
+        'cycle': cycle_number,
+        'python_s': cycle_python_s,
+      })
+      set_runtime_cycle_total('R1', cycle_number, cycle_python_s)
+      print(f"TOTAL CICLO R1 #{cycle_number}: {cycle_python_s:.3f}s ({cycle_python_min:.3f} min)")
 
       if R1_SEQUENCE_CYCLES > 0 and cycle_number >= R1_SEQUENCE_CYCLES:
         break
@@ -1690,8 +2134,14 @@ try:
   r2_completed_cycles = r2_sequence_state.get('completed_cycles', 0)
   print_timing_summary(section_times, current_total_python, total_robodk_seconds, r1_completed_cycles, r2_completed_cycles)
   if EXPORT_TIMES_CSV:
-    export_timing_summary_csv(section_times, current_total_python, total_robodk_seconds, TIMES_CSV_FILE, r1_completed_cycles, r2_completed_cycles)
+    export_timing_summary_csv(section_times, current_total_python, total_robodk_seconds, TIMES_CSV_FILE, r1_completed_cycles, r2_completed_cycles, cycle_totals)
+  update_runtime_machine('R1', status='SIN OPERACIÓN', operation='-')
+  update_runtime_machine('R2', status='SIN OPERACIÓN', operation='-')
+  set_runtime_global_status('FINALIZADO')
 except Exception as error:
+  update_runtime_machine('R1', status='ERROR', operation=str(error))
+  update_runtime_machine('R2', status='ERROR', operation=str(error))
+  set_runtime_global_status('ERROR')
   print(f"Error en comunicación/ejecución con RoboDK: {error}")
   raise
 
@@ -1701,3 +2151,6 @@ except Exception as error:
 
 end_time = timer()
 print(f"Tiempo de ejecucion: {end_time - start_time:.6f} segundos")
+
+if status_dashboard is not None:
+  status_dashboard.stop()
