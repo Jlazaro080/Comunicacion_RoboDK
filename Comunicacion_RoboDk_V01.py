@@ -3,6 +3,7 @@ import sys
 import difflib
 import csv
 import os
+import threading
 from datetime import datetime
 from robodk import robolink
 
@@ -23,49 +24,58 @@ RUN_OP_70_SEQUENCE = True
 STRICT_OP_70_REQUIRED = False
 RUN_NOK_SEQUENCE = False
 STRICT_NOK_REQUIRED = False
+RUN_R2_OP_70_CONTROLLED = True
+STRICT_R2_OP_70_CONTROLLED_REQUIRED = False
+OP70_HANDSHAKE_TIMEOUT_S = 120.0
+OP70_HANDSHAKE_POLL_S = 0.1
+R1_SEQUENCE_CYCLES = 2  # 0 = infinito (R1 vuelve a Op_00 tras terminar Op_70)
 OP_30_OPERATION_OPTION = os.getenv('OP30_OPTION', 'B').strip().upper()  # Opciones: 'A', 'B'
 MONITOR_ONLY_ACTIVE_OP30_FRAME = True
 FORCE_VISIBLE_TEST_MOVE = False
-R1_OP_00_LINEAR_SPEED_MM_S = 300
-R1_OP_00_JOINT_SPEED_DEG_S = 250
-R1_OP_00_X_LINEAR_SPEED_MM_S = 60
-R1_OP_00_X_JOINT_SPEED_DEG_S = 180
-R1_OP_00_X_DWELL_S = 1.0
-R1_OP_10_LINEAR_SPEED_MM_S = 300
-R1_OP_10_JOINT_SPEED_DEG_S = 250
-R1_OP_10_X_LINEAR_SPEED_MM_S = 35
-R1_OP_10_X_JOINT_SPEED_DEG_S = 120
-R1_OP_10_X_DWELL_S = 1.0
-R1_OP_20_LINEAR_SPEED_MM_S = 300
-R1_OP_20_JOINT_SPEED_DEG_S = 250
-R1_OP_20_X_LINEAR_SPEED_MM_S = 35
-R1_OP_20_X_JOINT_SPEED_DEG_S = 120
-R1_OP_20_X_DWELL_S = 1.0
-R1_OP_30_LINEAR_SPEED_MM_S = 300
-R1_OP_30_JOINT_SPEED_DEG_S = 250
-R1_OP_30_X_LINEAR_SPEED_MM_S = 35
-R1_OP_30_X_JOINT_SPEED_DEG_S = 120
-R1_OP_30_X_DWELL_S = 1.0
-R1_OP_50_LINEAR_SPEED_MM_S = 300
-R1_OP_50_JOINT_SPEED_DEG_S = 250
-R1_OP_50_X_LINEAR_SPEED_MM_S = 35
-R1_OP_50_X_JOINT_SPEED_DEG_S = 120
-R1_OP_50_X_DWELL_S = 1.0
-R1_OP_60_LINEAR_SPEED_MM_S = 300
-R1_OP_60_JOINT_SPEED_DEG_S = 250
-R1_OP_60_X_LINEAR_SPEED_MM_S = 35
-R1_OP_60_X_JOINT_SPEED_DEG_S = 120
-R1_OP_60_X_DWELL_S = 1.0
-R1_OP_70_LINEAR_SPEED_MM_S = 300
-R1_OP_70_JOINT_SPEED_DEG_S = 250
-R1_OP_70_X_LINEAR_SPEED_MM_S = 35
-R1_OP_70_X_JOINT_SPEED_DEG_S = 120
-R1_OP_70_X_DWELL_S = 1.0
-R1_NOK_LINEAR_SPEED_MM_S = 300
-R1_NOK_JOINT_SPEED_DEG_S = 250
-R1_NOK_X_LINEAR_SPEED_MM_S = 35
-R1_NOK_X_JOINT_SPEED_DEG_S = 120
-R1_NOK_X_DWELL_S = 1.0
+R1_OP_00_LINEAR_SPEED_MM_S = 500
+R1_OP_00_JOINT_SPEED_DEG_S = 350
+R1_OP_00_X_LINEAR_SPEED_MM_S = 120
+R1_OP_00_X_JOINT_SPEED_DEG_S = 220
+R1_OP_00_X_DWELL_S = 0.4
+R1_OP_10_LINEAR_SPEED_MM_S = 500
+R1_OP_10_JOINT_SPEED_DEG_S = 350
+R1_OP_10_X_LINEAR_SPEED_MM_S = 120
+R1_OP_10_X_JOINT_SPEED_DEG_S = 220
+R1_OP_10_X_DWELL_S = 0.4
+R1_OP_20_LINEAR_SPEED_MM_S = 500
+R1_OP_20_JOINT_SPEED_DEG_S = 350
+R1_OP_20_X_LINEAR_SPEED_MM_S = 120
+R1_OP_20_X_JOINT_SPEED_DEG_S = 220
+R1_OP_20_X_DWELL_S = 0.4
+R1_OP_30_LINEAR_SPEED_MM_S = 500
+R1_OP_30_JOINT_SPEED_DEG_S = 350
+R1_OP_30_X_LINEAR_SPEED_MM_S = 120
+R1_OP_30_X_JOINT_SPEED_DEG_S = 220
+R1_OP_30_X_DWELL_S = 0.4
+R1_OP_50_LINEAR_SPEED_MM_S = 500
+R1_OP_50_JOINT_SPEED_DEG_S = 350
+R1_OP_50_X_LINEAR_SPEED_MM_S = 120
+R1_OP_50_X_JOINT_SPEED_DEG_S = 220
+R1_OP_50_X_DWELL_S = 0.4
+R1_OP_60_LINEAR_SPEED_MM_S = 500
+R1_OP_60_JOINT_SPEED_DEG_S = 350
+R1_OP_60_X_LINEAR_SPEED_MM_S = 120
+R1_OP_60_X_JOINT_SPEED_DEG_S = 220
+R1_OP_60_X_DWELL_S = 0.4
+R1_OP_70_LINEAR_SPEED_MM_S = 500
+R1_OP_70_JOINT_SPEED_DEG_S = 350
+R1_OP_70_X_LINEAR_SPEED_MM_S = 120
+R1_OP_70_X_JOINT_SPEED_DEG_S = 220
+R1_OP_70_X_DWELL_S = 0.4
+R2_OP_70_LINEAR_SPEED_MM_S = 500
+R2_OP_70_JOINT_SPEED_DEG_S = 350
+R2_OP_70_X_LINEAR_SPEED_MM_S = 120
+R2_OP_70_X_JOINT_SPEED_DEG_S = 220
+R1_NOK_LINEAR_SPEED_MM_S = 500
+R1_NOK_JOINT_SPEED_DEG_S = 350
+R1_NOK_X_LINEAR_SPEED_MM_S = 120
+R1_NOK_X_JOINT_SPEED_DEG_S = 220
+R1_NOK_X_DWELL_S = 0.4
 EXPORT_TIMES_CSV = True
 TIMES_CSV_FILE = 'tiempos_robodk.csv'
 
@@ -298,11 +308,86 @@ def execute_robot_step_with_speed(robot, step_name, move_type, target, linear_sp
   execute_robot_step(robot, step_name, move_type, target)
 
 
+def execute_parallel_robot_step_with_speed(
+  robot1,
+  robot1_step_name,
+  robot1_target,
+  robot1_linear_speed_mm_s,
+  robot1_joint_speed_deg_s,
+  robot2,
+  robot2_step_name,
+  robot2_target,
+  robot2_linear_speed_mm_s,
+  robot2_joint_speed_deg_s,
+  move_type,
+):
+  print(f"Inicio paso paralelo: {robot1_step_name} | {robot2_step_name}")
+
+  robot1.setSpeed(robot1_linear_speed_mm_s, robot1_joint_speed_deg_s)
+  robot2.setSpeed(robot2_linear_speed_mm_s, robot2_joint_speed_deg_s)
+
+  try:
+    if move_type == 'J':
+      robot1.MoveJ(robot1_target, False)
+      robot2.MoveJ(robot2_target, False)
+    elif move_type == 'L':
+      robot1.MoveL(robot1_target, False)
+      robot2.MoveL(robot2_target, False)
+    else:
+      raise Exception(f"Tipo de movimiento no soportado: {move_type}")
+
+    robot1.WaitMove()
+    robot2.WaitMove()
+  except TypeError:
+    if move_type == 'J':
+      robot1.MoveJ(robot1_target)
+      robot2.MoveJ(robot2_target)
+    elif move_type == 'L':
+      robot1.MoveL(robot1_target)
+      robot2.MoveL(robot2_target)
+    else:
+      raise Exception(f"Tipo de movimiento no soportado: {move_type}")
+
+    robot1.WaitMove()
+    robot2.WaitMove()
+
+  print(f"Fin paso paralelo: {robot1_step_name} | {robot2_step_name}")
+
+
 def execute_dwell(label, dwell_seconds):
   if dwell_seconds <= 0:
     return
   print(f"Pausa en {label}: {dwell_seconds:.2f}s")
   time.sleep(dwell_seconds)
+
+
+def execute_r2_op70_sequence_worker(
+  state,
+  robot,
+  frame_item,
+  target_afuera,
+  target_dentro,
+  target_x,
+  linear_speed_mm_s,
+  joint_speed_deg_s,
+  x_linear_speed_mm_s,
+  x_joint_speed_deg_s,
+  x_dwell_s,
+):
+  try:
+    robot.setPoseFrame(frame_item)
+    robot.setSpeed(linear_speed_mm_s, joint_speed_deg_s)
+    robot.setRounding(0)
+
+    print("Movimientos Robot 2 - Operación Op_70 (después de R1)")
+    execute_robot_step_with_speed(robot, 'R2 -> Op_70_Pos_Afuera (MoveJ)', 'J', target_afuera, linear_speed_mm_s, joint_speed_deg_s)
+    execute_robot_step_with_speed(robot, 'R2 -> Op_70_Pos_Dentro (MoveL)', 'L', target_dentro, linear_speed_mm_s, joint_speed_deg_s)
+    execute_robot_step_with_speed(robot, 'R2 -> Op_70_Pos_X (MoveL)', 'L', target_x, x_linear_speed_mm_s, x_joint_speed_deg_s)
+    execute_dwell('R2 Op_70 Pos_X', x_dwell_s)
+    execute_robot_step_with_speed(robot, 'R2 -> Op_70_Pos_Afuera (MoveL)', 'L', target_afuera, linear_speed_mm_s, joint_speed_deg_s)
+    state['completed_cycles'] = state.get('completed_cycles', 0) + 1
+  except Exception as error:
+    state['error'] = error
 
 
 def get_robodk_sim_time(rdk):
@@ -506,6 +591,11 @@ RDK_R1_OP_70_Pos_Dentro = get_first_valid_optional(RDK, ['R1_Op_70_Pos_Dentro'])
 RDK_R1_OP_70_Pos_X = get_first_valid_optional(RDK, ['R1_Op_70_Pos_X'])
 RDK_R1_OP_70_Pos_Afuera = get_first_valid_optional(RDK, ['R1_Op_70_Pos_Afuera'])
 
+frameR2_OP_70 = get_first_valid_optional(RDK, ['R2_Op_70'])
+RDK_R2_OP_70_Pos_Dentro = get_first_valid_optional(RDK, ['R2_Op_70_Pos_Dentro'])
+RDK_R2_OP_70_Pos_X = get_first_valid_optional(RDK, ['R2_Op_70_Pos_X'])
+RDK_R2_OP_70_Pos_Afuera = get_first_valid_optional(RDK, ['R2_Op_70_Pos_Afuera'])
+
 frameR1_NOK = get_first_valid_optional(RDK, ['R1_nok', 'R1_NOK'])
 RDK_R1_NOK_Pos_Dentro = get_first_valid_optional(RDK, ['R1_nok_Pos_Dentro', 'R1_NOK_Pos_Dentro'])
 RDK_R1_NOK_Pos_X = get_first_valid_optional(RDK, ['R1_nok_Pos_X', 'R1_NOK_Pos_X'])
@@ -637,6 +727,22 @@ sequence_op_70_items_found = all([
   RDK_R1_OP_70_Pos_Afuera is not None
 ])
 
+r2_op_70_required_items = {
+  'R2_Op_70': frameR2_OP_70,
+  'R2_Op_70_Pos_Dentro': RDK_R2_OP_70_Pos_Dentro,
+  'R2_Op_70_Pos_X': RDK_R2_OP_70_Pos_X,
+  'R2_Op_70_Pos_Afuera': RDK_R2_OP_70_Pos_Afuera,
+}
+
+missing_r2_op_70_items = [name for name, value in r2_op_70_required_items.items() if value is None]
+
+sequence_r2_op_70_items_found = all([
+  frameR2_OP_70 is not None,
+  RDK_R2_OP_70_Pos_Dentro is not None,
+  RDK_R2_OP_70_Pos_X is not None,
+  RDK_R2_OP_70_Pos_Afuera is not None
+])
+
 nok_required_items = {
   'R1_nok': frameR1_NOK,
   'R1_nok_Pos_Dentro': RDK_R1_NOK_Pos_Dentro,
@@ -714,6 +820,14 @@ if run_ops_sequences:
     else:
       print("Secuencia Op_70 lista: todos los elementos requeridos están disponibles.")
 
+  if RUN_OP_70_SEQUENCE and RUN_R2_OP_70_CONTROLLED:
+    if missing_r2_op_70_items:
+      print("Elementos faltantes para secuencia controlada R2_Op_70:")
+      for missing_item in missing_r2_op_70_items:
+        print(f"  - {missing_item}")
+    else:
+      print("Secuencia controlada R2_Op_70 lista: todos los elementos requeridos están disponibles.")
+
   if RUN_NOK_SEQUENCE:
     if missing_nok_items:
       print("Elementos faltantes para secuencia NOK:")
@@ -743,11 +857,20 @@ if run_ops_sequences and RUN_OP_60_SEQUENCE and STRICT_OP_60_REQUIRED and not se
 if run_ops_sequences and RUN_OP_70_SEQUENCE and STRICT_OP_70_REQUIRED and not sequence_op_70_items_found:
   raise Exception(f"Secuencia Op_70 estricta: faltan elementos Op_70: {missing_op_70_items}")
 
+if run_ops_sequences and RUN_OP_70_SEQUENCE and RUN_R2_OP_70_CONTROLLED and STRICT_R2_OP_70_CONTROLLED_REQUIRED and not sequence_r2_op_70_items_found:
+  raise Exception(f"Secuencia controlada R2_Op_70 estricta: faltan elementos R2_Op_70: {missing_r2_op_70_items}")
+
 if run_ops_sequences and RUN_NOK_SEQUENCE and STRICT_NOK_REQUIRED and not sequence_nok_items_found:
   raise Exception(f"Secuencia NOK estricta: faltan elementos NOK: {missing_nok_items}")
 
 try:
   section_times = {}
+  r2_op70_state = {
+    'thread': None,
+    'error': None,
+    'dispatched_cycles': 0,
+    'completed_cycles': 0,
+  }
   total_robodk_start = get_robodk_sim_time(RDK)
   if MONITOR_ONLY_ACTIVE_OP30_FRAME:
     monitored_frames = {
@@ -762,6 +885,7 @@ try:
       'R1_Op_50': frameR1_OP_50,
       'R1_Op_60': frameR1_OP_60,
       'R1_Op_70': frameR1_OP_70,
+      'R2_Op_70': frameR2_OP_70,
       'R1_nok': frameR1_NOK,
     }
 
@@ -787,7 +911,7 @@ try:
   print(f"Juntas iniciales R1: {robotR1.Joints().list()}")
   print(f"Juntas iniciales R2: {robotR2.Joints().list()}")
 
-  robotR1.setSpeed(1, 50)
+  robotR1.setSpeed(80, 150)
   run_timed_block(
     'Home R1',
     RDK,
@@ -796,7 +920,7 @@ try:
     lambda: move_robot_to_home(robotR1, 'R1', RDK_R1_Home_General),
   )
 
-  robotR2.setSpeed(10, 50)
+  robotR2.setSpeed(80, 150)
   run_timed_block(
     'Home R2',
     RDK,
@@ -806,171 +930,231 @@ try:
   )
 
   if run_ops_sequences and sequence_op_00_items_found:
-    #############################Movimientos Robot 1
-    robotR1.setPoseFrame(frameR1_OP_00)
-    robotR1.setSpeed(R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S)
-    robotR1.setRounding(0)
+    cycle_number = 0
+    while True:
+      cycle_number = cycle_number + 1
+      print(f"\n=== Ciclo R1 #{cycle_number} ===")
 
-    print("Movimientos Robot 1")
-    run_timed_block(
-      'Operación Op_00',
-      RDK,
-      timer,
-      section_times,
-      lambda: (
-        execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_00_Pos_Afuera, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
-        execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_00_Pos_Dentro, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
-        execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_X (MoveL)', 'L', RDK_R1_OP_00_Pos_X, R1_OP_00_X_LINEAR_SPEED_MM_S, R1_OP_00_X_JOINT_SPEED_DEG_S),
-        execute_dwell('Op_00 Pos_X', R1_OP_00_X_DWELL_S),
-        execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_00_Pos_Afuera, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
-      ),
-    )
-
-    if RUN_OP_10_SEQUENCE and sequence_op_10_items_found:
-      robotR1.setPoseFrame(frameR1_OP_10)
-      robotR1.setSpeed(R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S)
+      #############################Movimientos Robot 1
+      robotR1.setPoseFrame(frameR1_OP_00)
+      robotR1.setSpeed(R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S)
       robotR1.setRounding(0)
 
-      print("Movimientos Robot 1 - Operación Op_10")
+      print("Movimientos Robot 1")
       run_timed_block(
-        'Operación Op_10',
+        'Operación Op_00',
         RDK,
         timer,
         section_times,
         lambda: (
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_10_Pos_Dentro, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_X (MoveL)', 'L', RDK_R1_OP_10_Pos_X, R1_OP_10_X_LINEAR_SPEED_MM_S, R1_OP_10_X_JOINT_SPEED_DEG_S),
-          execute_dwell('Op_10 Pos_X', R1_OP_10_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_00_Pos_Afuera, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_00_Pos_Dentro, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_X (MoveL)', 'L', RDK_R1_OP_00_Pos_X, R1_OP_00_X_LINEAR_SPEED_MM_S, R1_OP_00_X_JOINT_SPEED_DEG_S),
+          execute_dwell('Op_00 Pos_X', R1_OP_00_X_DWELL_S),
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_00_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_00_Pos_Afuera, R1_OP_00_LINEAR_SPEED_MM_S, R1_OP_00_JOINT_SPEED_DEG_S),
         ),
       )
-    elif RUN_OP_10_SEQUENCE:
-      print("Secuencia Op_10 omitida: faltan frame/targets en esta operación.")
 
-    if RUN_OP_20_SEQUENCE and sequence_op_20_items_found:
-      robotR1.setPoseFrame(frameR1_OP_20)
-      robotR1.setSpeed(R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S)
-      robotR1.setRounding(0)
+      if RUN_OP_10_SEQUENCE and sequence_op_10_items_found:
+        robotR1.setPoseFrame(frameR1_OP_10)
+        robotR1.setSpeed(R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
 
-      print("Movimientos Robot 1 - Operación Op_20")
-      run_timed_block(
-        'Operación Op_20',
-        RDK,
-        timer,
-        section_times,
-        lambda: (
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_20_Pos_Afuera, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_20_Pos_Dentro, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_X (MoveL)', 'L', RDK_R1_OP_20_Pos_X, R1_OP_20_X_LINEAR_SPEED_MM_S, R1_OP_20_X_JOINT_SPEED_DEG_S),
-          execute_dwell('Op_20 Pos_X', R1_OP_20_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_20_Pos_Afuera, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
-        ),
-      )
-    elif RUN_OP_20_SEQUENCE:
-      print("Secuencia Op_20 omitida: faltan frame/targets en esta operación.")
+        print("Movimientos Robot 1 - Operación Op_10")
+        run_timed_block(
+          'Operación Op_10',
+          RDK,
+          timer,
+          section_times,
+          lambda: (
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_10_Pos_Dentro, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_X (MoveL)', 'L', RDK_R1_OP_10_Pos_X, R1_OP_10_X_LINEAR_SPEED_MM_S, R1_OP_10_X_JOINT_SPEED_DEG_S),
+            execute_dwell('Op_10 Pos_X', R1_OP_10_X_DWELL_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+          ),
+        )
+      elif RUN_OP_10_SEQUENCE:
+        print("Secuencia Op_10 omitida: faltan frame/targets en esta operación.")
 
-    if RUN_OP_30_SEQUENCE and sequence_op_30_items_found:
-      if OP_30_OPERATION_OPTION == 'A':
-        frameR1_OP_30_runtime = get_first_valid_or_raise(RDK, ['R1_Op_30_A'])
-      else:
-        frameR1_OP_30_runtime = get_first_valid_or_raise(RDK, ['R1_Op_30_B'])
+      if RUN_OP_20_SEQUENCE and sequence_op_20_items_found:
+        robotR1.setPoseFrame(frameR1_OP_20)
+        robotR1.setSpeed(R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
 
-      assert_op30_targets_belong_to_selected_frame(
-        frameR1_OP_30_runtime,
-        {
-          'R1_Op_30_Pos_Afuera': RDK_R1_OP_30_Pos_Afuera,
-          'R1_Op_30_Pos_Dentro': RDK_R1_OP_30_Pos_Dentro,
-          'R1_Op_30_Pos_X': RDK_R1_OP_30_Pos_X,
-        },
-      )
+        print("Movimientos Robot 1 - Operación Op_20")
+        run_timed_block(
+          'Operación Op_20',
+          RDK,
+          timer,
+          section_times,
+          lambda: (
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_20_Pos_Afuera, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_20_Pos_Dentro, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_X (MoveL)', 'L', RDK_R1_OP_20_Pos_X, R1_OP_20_X_LINEAR_SPEED_MM_S, R1_OP_20_X_JOINT_SPEED_DEG_S),
+            execute_dwell('Op_20 Pos_X', R1_OP_20_X_DWELL_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_20_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_20_Pos_Afuera, R1_OP_20_LINEAR_SPEED_MM_S, R1_OP_20_JOINT_SPEED_DEG_S),
+          ),
+        )
+      elif RUN_OP_20_SEQUENCE:
+        print("Secuencia Op_20 omitida: faltan frame/targets en esta operación.")
 
-      robotR1.setPoseFrame(frameR1_OP_30_runtime)
-      robotR1.setSpeed(R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S)
-      robotR1.setRounding(0)
+      if RUN_OP_30_SEQUENCE and sequence_op_30_items_found:
+        if OP_30_OPERATION_OPTION == 'A':
+          frameR1_OP_30_runtime = get_first_valid_or_raise(RDK, ['R1_Op_30_A'])
+        else:
+          frameR1_OP_30_runtime = get_first_valid_or_raise(RDK, ['R1_Op_30_B'])
 
-      print(f"Movimientos Robot 1 - Operación Op_30_{OP_30_OPERATION_OPTION}")
-      run_timed_block(
-        f'Operación Op_30_{OP_30_OPERATION_OPTION}',
-        RDK,
-        timer,
-        section_times,
-        lambda: (
-          execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_30_Pos_Afuera, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_30_Pos_Dentro, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_X (MoveL)', 'L', RDK_R1_OP_30_Pos_X, R1_OP_30_X_LINEAR_SPEED_MM_S, R1_OP_30_X_JOINT_SPEED_DEG_S),
-          execute_dwell(f'Op_30_{OP_30_OPERATION_OPTION} Pos_X', R1_OP_30_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_30_Pos_Afuera, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
-        ),
-      )
-    elif RUN_OP_30_SEQUENCE:
-      print(f"Secuencia Op_30_{OP_30_OPERATION_OPTION} omitida: faltan frame/targets en esta operación.")
+        assert_op30_targets_belong_to_selected_frame(
+          frameR1_OP_30_runtime,
+          {
+            'R1_Op_30_Pos_Afuera': RDK_R1_OP_30_Pos_Afuera,
+            'R1_Op_30_Pos_Dentro': RDK_R1_OP_30_Pos_Dentro,
+            'R1_Op_30_Pos_X': RDK_R1_OP_30_Pos_X,
+          },
+        )
 
-    if RUN_OP_50_SEQUENCE and sequence_op_50_items_found:
-      robotR1.setPoseFrame(frameR1_OP_50)
-      robotR1.setSpeed(R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S)
-      robotR1.setRounding(0)
+        robotR1.setPoseFrame(frameR1_OP_30_runtime)
+        robotR1.setSpeed(R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
 
-      print("Movimientos Robot 1 - Operación Op_50")
-      run_timed_block(
-        'Operación Op_50',
-        RDK,
-        timer,
-        section_times,
-        lambda: (
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_50_Pos_Afuera, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_50_Pos_Dentro, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_X (MoveL)', 'L', RDK_R1_OP_50_Pos_X, R1_OP_50_X_LINEAR_SPEED_MM_S, R1_OP_50_X_JOINT_SPEED_DEG_S),
-          execute_dwell('Op_50 Pos_X', R1_OP_50_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_50_Pos_Afuera, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
-        ),
-      )
-    elif RUN_OP_50_SEQUENCE:
-      print("Secuencia Op_50 omitida: faltan frame/targets en esta operación.")
+        print(f"Movimientos Robot 1 - Operación Op_30_{OP_30_OPERATION_OPTION}")
+        run_timed_block(
+          f'Operación Op_30_{OP_30_OPERATION_OPTION}',
+          RDK,
+          timer,
+          section_times,
+          lambda: (
+            execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_30_Pos_Afuera, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_30_Pos_Dentro, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_X (MoveL)', 'L', RDK_R1_OP_30_Pos_X, R1_OP_30_X_LINEAR_SPEED_MM_S, R1_OP_30_X_JOINT_SPEED_DEG_S),
+            execute_dwell(f'Op_30_{OP_30_OPERATION_OPTION} Pos_X', R1_OP_30_X_DWELL_S),
+            execute_robot_step_with_speed(robotR1, f'R1 -> Op_30_{OP_30_OPERATION_OPTION}_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_30_Pos_Afuera, R1_OP_30_LINEAR_SPEED_MM_S, R1_OP_30_JOINT_SPEED_DEG_S),
+          ),
+        )
+      elif RUN_OP_30_SEQUENCE:
+        print(f"Secuencia Op_30_{OP_30_OPERATION_OPTION} omitida: faltan frame/targets en esta operación.")
 
-    if RUN_OP_60_SEQUENCE and sequence_op_60_items_found:
-      robotR1.setPoseFrame(frameR1_OP_60)
-      robotR1.setSpeed(R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S)
-      robotR1.setRounding(0)
+      if RUN_OP_50_SEQUENCE and sequence_op_50_items_found:
+        robotR1.setPoseFrame(frameR1_OP_50)
+        robotR1.setSpeed(R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
 
-      print("Movimientos Robot 1 - Operación Op_60")
-      run_timed_block(
-        'Operación Op_60',
-        RDK,
-        timer,
-        section_times,
-        lambda: (
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_60_Pos_Afuera, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_60_Pos_Dentro, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_X (MoveL)', 'L', RDK_R1_OP_60_Pos_X, R1_OP_60_X_LINEAR_SPEED_MM_S, R1_OP_60_X_JOINT_SPEED_DEG_S),
-          execute_dwell('Op_60 Pos_X', R1_OP_60_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_60_Pos_Afuera, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
-        ),
-      )
-    elif RUN_OP_60_SEQUENCE:
-      print("Secuencia Op_60 omitida: faltan frame/targets en esta operación.")
+        print("Movimientos Robot 1 - Operación Op_50")
+        run_timed_block(
+          'Operación Op_50',
+          RDK,
+          timer,
+          section_times,
+          lambda: (
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_50_Pos_Afuera, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_50_Pos_Dentro, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_X (MoveL)', 'L', RDK_R1_OP_50_Pos_X, R1_OP_50_X_LINEAR_SPEED_MM_S, R1_OP_50_X_JOINT_SPEED_DEG_S),
+            execute_dwell('Op_50 Pos_X', R1_OP_50_X_DWELL_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_50_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_50_Pos_Afuera, R1_OP_50_LINEAR_SPEED_MM_S, R1_OP_50_JOINT_SPEED_DEG_S),
+          ),
+        )
+      elif RUN_OP_50_SEQUENCE:
+        print("Secuencia Op_50 omitida: faltan frame/targets en esta operación.")
 
-    if RUN_OP_70_SEQUENCE and sequence_op_70_items_found:
-      robotR1.setPoseFrame(frameR1_OP_70)
-      robotR1.setSpeed(R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S)
-      robotR1.setRounding(0)
+      if RUN_OP_60_SEQUENCE and sequence_op_60_items_found:
+        robotR1.setPoseFrame(frameR1_OP_60)
+        robotR1.setSpeed(R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
 
-      print("Movimientos Robot 1 - Operación Op_70")
-      run_timed_block(
-        'Operación Op_70',
-        RDK,
-        timer,
-        section_times,
-        lambda: (
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_70_Pos_Dentro, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_X (MoveL)', 'L', RDK_R1_OP_70_Pos_X, R1_OP_70_X_LINEAR_SPEED_MM_S, R1_OP_70_X_JOINT_SPEED_DEG_S),
-          execute_dwell('Op_70 Pos_X', R1_OP_70_X_DWELL_S),
-          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
-        ),
-      )
-    elif RUN_OP_70_SEQUENCE:
-      print("Secuencia Op_70 omitida: faltan frame/targets en esta operación.")
+        print("Movimientos Robot 1 - Operación Op_60")
+        run_timed_block(
+          'Operación Op_60',
+          RDK,
+          timer,
+          section_times,
+          lambda: (
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_60_Pos_Afuera, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_60_Pos_Dentro, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_X (MoveL)', 'L', RDK_R1_OP_60_Pos_X, R1_OP_60_X_LINEAR_SPEED_MM_S, R1_OP_60_X_JOINT_SPEED_DEG_S),
+            execute_dwell('Op_60 Pos_X', R1_OP_60_X_DWELL_S),
+            execute_robot_step_with_speed(robotR1, 'R1 -> Op_60_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_60_Pos_Afuera, R1_OP_60_LINEAR_SPEED_MM_S, R1_OP_60_JOINT_SPEED_DEG_S),
+          ),
+        )
+      elif RUN_OP_60_SEQUENCE:
+        print("Secuencia Op_60 omitida: faltan frame/targets en esta operación.")
+
+      if RUN_OP_70_SEQUENCE and sequence_op_70_items_found:
+        robotR1.setPoseFrame(frameR1_OP_70)
+        robotR1.setSpeed(R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S)
+        robotR1.setRounding(0)
+
+        if RUN_R2_OP_70_CONTROLLED and sequence_r2_op_70_items_found:
+          if r2_op70_state['error'] is not None:
+            raise Exception(f"Error en Op_70 de R2: {r2_op70_state['error']}")
+
+          running_thread = r2_op70_state['thread']
+          if running_thread is not None and running_thread.is_alive():
+            print("R1 llegó a Op_70 y espera: R2 aún ejecuta Op_70.")
+            wait_r1_start = timer()
+            while running_thread.is_alive():
+              if r2_op70_state['error'] is not None:
+                raise Exception(f"Error en Op_70 de R2: {r2_op70_state['error']}")
+              if (timer() - wait_r1_start) > OP70_HANDSHAKE_TIMEOUT_S:
+                raise Exception(
+                  "Timeout de control Op_70: R1 esperó a que R2 liberara Op_70."
+                )
+              time.sleep(OP70_HANDSHAKE_POLL_S)
+            r2_op70_state['thread'] = None
+
+          print("Movimientos Robot 1 - Operación Op_70 (controlado)")
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S)
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_70_Pos_Dentro, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S)
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_X (MoveL)', 'L', RDK_R1_OP_70_Pos_X, R1_OP_70_X_LINEAR_SPEED_MM_S, R1_OP_70_X_JOINT_SPEED_DEG_S)
+          execute_dwell('Op_70 Pos_X', R1_OP_70_X_DWELL_S)
+          execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S)
+
+          r2_op70_state['dispatched_cycles'] = r2_op70_state['dispatched_cycles'] + 1
+          print(
+            f"Despachando Op_70 de R2 en segundo plano (ciclo {r2_op70_state['dispatched_cycles']})."
+          )
+          r2_thread = threading.Thread(
+            target=execute_r2_op70_sequence_worker,
+            args=(
+              r2_op70_state,
+              robotR2,
+              frameR2_OP_70,
+              RDK_R2_OP_70_Pos_Afuera,
+              RDK_R2_OP_70_Pos_Dentro,
+              RDK_R2_OP_70_Pos_X,
+              R2_OP_70_LINEAR_SPEED_MM_S,
+              R2_OP_70_JOINT_SPEED_DEG_S,
+              R2_OP_70_X_LINEAR_SPEED_MM_S,
+              R2_OP_70_X_JOINT_SPEED_DEG_S,
+              R1_OP_70_X_DWELL_S,
+            ),
+            daemon=True,
+          )
+          r2_op70_state['thread'] = r2_thread
+          r2_thread.start()
+        else:
+          if RUN_R2_OP_70_CONTROLLED:
+            print("Secuencia controlada R2_Op_70 omitida: faltan frame/targets de R2. Se ejecuta Op_70 solo con R1.")
+
+          print("Movimientos Robot 1 - Operación Op_70")
+          run_timed_block(
+            'Operación Op_70',
+            RDK,
+            timer,
+            section_times,
+            lambda: (
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_70_Pos_Dentro, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_X (MoveL)', 'L', RDK_R1_OP_70_Pos_X, R1_OP_70_X_LINEAR_SPEED_MM_S, R1_OP_70_X_JOINT_SPEED_DEG_S),
+              execute_dwell('Op_70 Pos_X', R1_OP_70_X_DWELL_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_70_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_70_Pos_Afuera, R1_OP_70_LINEAR_SPEED_MM_S, R1_OP_70_JOINT_SPEED_DEG_S),
+            ),
+          )
+      elif RUN_OP_70_SEQUENCE:
+        print("Secuencia Op_70 omitida: faltan frame/targets en esta operación.")
+
+      if R1_SEQUENCE_CYCLES > 0 and cycle_number >= R1_SEQUENCE_CYCLES:
+        break
   elif run_ops_sequences:
     print("Secuencia Op_00 omitida: faltan frame/targets en esta operación.")
   else:
@@ -1001,6 +1185,21 @@ try:
   if FORCE_VISIBLE_TEST_MOVE and EXECUTION_MODE == 'HOME_ONLY':
     do_visible_test_move(robotR1, 'R1', joint_index=0, delta_deg=10.0)
     do_visible_test_move(robotR2, 'R2', joint_index=0, delta_deg=10.0)
+
+  if run_ops_sequences and RUN_R2_OP_70_CONTROLLED and sequence_r2_op_70_items_found:
+    running_thread = r2_op70_state.get('thread')
+    if running_thread is not None and running_thread.is_alive():
+      print("Esperando fin de Op_70 de R2 antes de cerrar ejecución...")
+      wait_close_start = timer()
+      while running_thread.is_alive():
+        if r2_op70_state.get('error') is not None:
+          raise Exception(f"Error en Op_70 de R2: {r2_op70_state['error']}")
+        if (timer() - wait_close_start) > OP70_HANDSHAKE_TIMEOUT_S:
+          raise Exception("Timeout al cerrar: R2 no terminó Op_70 en el tiempo esperado.")
+        time.sleep(OP70_HANDSHAKE_POLL_S)
+
+    if r2_op70_state.get('error') is not None:
+      raise Exception(f"Error en Op_70 de R2: {r2_op70_state['error']}")
 
   print(f"Juntas finales R1: {robotR1.Joints().list()}")
   print(f"Juntas finales R2: {robotR2.Joints().list()}")
