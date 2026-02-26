@@ -16,7 +16,7 @@ RUN_OP_20_SEQUENCE = True
 STRICT_OP_20_REQUIRED = False
 RUN_OP_30_SEQUENCE = True
 STRICT_OP_30_REQUIRED = False
-RUN_OP_50_SEQUENCE = True
+RUN_OP_50_SEQUENCE = False
 STRICT_OP_50_REQUIRED = False
 RUN_OP_60_SEQUENCE = True
 STRICT_OP_60_REQUIRED = False
@@ -31,11 +31,11 @@ SEQUENCE_VERIFICATION_MODE = True
 VERIFICATION_LINEAR_SPEED_MM_S = 5000
 VERIFICATION_JOINT_SPEED_DEG_S = 2000
 VERIFICATION_DWELL_S = 0.0
-RUN_R2_IN_BACKGROUND = False
-OP70_HANDSHAKE_TIMEOUT_S = 120.0
+RUN_R2_IN_BACKGROUND = True
+OP70_HANDSHAKE_TIMEOUT_S = 300.0
 OP70_HANDSHAKE_POLL_S = 0.1
-R1_SEQUENCE_CYCLES = 1  # 0 = infinito (R1 vuelve a Op_00 tras terminar Op_70)
-OP_30_OPERATION_OPTION = os.getenv('OP30_OPTION', 'B').strip().upper()  # Opciones: 'A', 'B'
+R1_SEQUENCE_CYCLES = 3  # 0 = infinito (R1 vuelve a Op_00 tras terminar Op_70)
+OP_30_OPERATION_OPTION = os.getenv('OP30_OPTION', 'A').strip().upper()  # Opciones: 'A', 'B'
 MONITOR_ONLY_ACTIVE_OP30_FRAME = True
 FORCE_VISIBLE_TEST_MOVE = False
 R1_OP_00_LINEAR_SPEED_MM_S = 500
@@ -413,10 +413,30 @@ def execute_dwell(label, dwell_seconds):
   time.sleep(dwell_seconds)
 
 
-def execute_r2_operations_sequence_worker(state, robot, operation_sequence):
+def register_timing_metric(metrics, label, python_seconds, robodk_seconds=None, metrics_lock=None):
+  metric_data = {
+    'python_s': python_seconds,
+    'robodk_s': robodk_seconds,
+  }
+
+  if metrics_lock is None:
+    metrics[label] = metric_data
+  else:
+    with metrics_lock:
+      metrics[label] = metric_data
+
+
+def execute_r2_operations_sequence_worker(state, robot, operation_sequence, timer_func=None, metrics=None, metrics_lock=None, cycle_id=None):
   try:
+    worker_timer = timer if timer_func is None else timer_func
+    cycle_label = cycle_id
+    if cycle_label is None:
+      cycle_label = state.get('dispatched_cycles', 0) + 1
+
     for operation in operation_sequence:
       op_name = operation['op_name']
+      state['current_op_name'] = op_name
+      state['op70_busy'] = op_name == 'Op_70'
       frame_item = operation['frame']
       target_afuera = operation['target_afuera']
       target_dentro = operation['target_dentro']
@@ -426,6 +446,8 @@ def execute_r2_operations_sequence_worker(state, robot, operation_sequence):
       x_linear_speed_mm_s = operation['x_linear_speed_mm_s']
       x_joint_speed_deg_s = operation['x_joint_speed_deg_s']
       x_dwell_s = operation['x_dwell_s']
+
+      op_python_start = worker_timer()
 
       robot.setPoseFrame(frame_item)
       robot.setSpeed(linear_speed_mm_s, joint_speed_deg_s)
@@ -438,9 +460,75 @@ def execute_r2_operations_sequence_worker(state, robot, operation_sequence):
       execute_dwell(f'R2 {op_name} Pos_X', x_dwell_s)
       execute_robot_step_with_speed(robot, f'R2 -> {op_name}_Pos_Afuera (MoveL)', 'L', target_afuera, linear_speed_mm_s, joint_speed_deg_s)
 
+      op_python_end = worker_timer()
+      if metrics is not None:
+        register_timing_metric(
+          metrics,
+          f'R2 Operación {op_name} - ciclo {cycle_label}',
+          op_python_end - op_python_start,
+          None,
+          metrics_lock,
+        )
+
+      if op_name == 'Op_70':
+        state['op70_busy'] = False
+
     state['completed_cycles'] = state.get('completed_cycles', 0) + 1
+    state['current_op_name'] = None
+    state['op70_busy'] = False
+  except Exception as error:
+    state['current_op_name'] = None
+    state['op70_busy'] = False
+    state['error'] = error
+
+
+def execute_r2_operations_sequence_worker_background(state, robot_name, operation_sequence, timer_func=None, metrics=None, metrics_lock=None, cycle_id=None):
+  try:
+    rdk_worker = robolink.Robolink()
+    robot_worker = get_item_or_raise(rdk_worker, robot_name)
+
+    operation_sequence_worker = []
+    for operation in operation_sequence:
+      operation_sequence_worker.append({
+        'op_name': operation['op_name'],
+        'frame': get_item_or_raise(rdk_worker, operation['frame_name']),
+        'target_afuera': get_item_or_raise(rdk_worker, operation['target_afuera_name']),
+        'target_dentro': get_item_or_raise(rdk_worker, operation['target_dentro_name']),
+        'target_x': get_item_or_raise(rdk_worker, operation['target_x_name']),
+        'linear_speed_mm_s': operation['linear_speed_mm_s'],
+        'joint_speed_deg_s': operation['joint_speed_deg_s'],
+        'x_linear_speed_mm_s': operation['x_linear_speed_mm_s'],
+        'x_joint_speed_deg_s': operation['x_joint_speed_deg_s'],
+        'x_dwell_s': operation['x_dwell_s'],
+      })
+
+    while True:
+      with state['state_lock']:
+        requested_cycles = state.get('requested_cycles', 0)
+        started_cycles = state.get('started_cycles', 0)
+        if started_cycles >= requested_cycles:
+          break
+        next_cycle_id = started_cycles + 1
+        state['started_cycles'] = next_cycle_id
+        state['dispatched_cycles'] = next_cycle_id
+
+      execute_r2_operations_sequence_worker(
+        state,
+        robot_worker,
+        operation_sequence_worker,
+        timer_func,
+        metrics,
+        metrics_lock,
+        next_cycle_id,
+      )
+
+      if state.get('error') is not None:
+        break
   except Exception as error:
     state['error'] = error
+  finally:
+    with state['state_lock']:
+      state['thread'] = None
 
 
 def get_robodk_sim_time(rdk):
@@ -516,7 +604,7 @@ def run_timed_block(label, rdk, timer_func, metrics, block_function):
   }
 
 
-def print_timing_summary(metrics, total_python_s, total_robodk_s):
+def print_timing_summary(metrics, total_python_s, total_robodk_s, r1_cycles=0, r2_cycles=0):
   print("\n=== Resumen de tiempos ===")
   for label, data in metrics.items():
     python_s = data['python_s']
@@ -532,9 +620,10 @@ def print_timing_summary(metrics, total_python_s, total_robodk_s):
   else:
     delta_total_s = total_python_s - total_robodk_s
     print(f"TOTAL: Python={total_python_s:.3f}s | RoboDK={total_robodk_s:.3f}s | Delta={delta_total_s:.3f}s")
+  print(f"Ciclos completados: R1={r1_cycles} | R2={r2_cycles}")
 
 
-def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file):
+def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file, r1_cycles=0, r2_cycles=0):
   timestamp = datetime.now().isoformat(timespec='seconds')
   rows = []
 
@@ -548,6 +637,8 @@ def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file)
       'python_s': f"{python_s:.6f}",
       'robodk_s': '' if robodk_s is None else f"{robodk_s:.6f}",
       'delta_s': '' if delta_s is None else f"{delta_s:.6f}",
+      'r1_cycles': str(r1_cycles),
+      'r2_cycles': str(r2_cycles),
     })
 
   total_delta_s = None if total_robodk_s is None else total_python_s - total_robodk_s
@@ -557,6 +648,8 @@ def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file)
     'python_s': f"{total_python_s:.6f}",
     'robodk_s': '' if total_robodk_s is None else f"{total_robodk_s:.6f}",
     'delta_s': '' if total_delta_s is None else f"{total_delta_s:.6f}",
+    'r1_cycles': str(r1_cycles),
+    'r2_cycles': str(r2_cycles),
   })
 
   file_exists = False
@@ -567,7 +660,7 @@ def export_timing_summary_csv(metrics, total_python_s, total_robodk_s, csv_file)
     file_exists = False
 
   with open(csv_file, 'a', newline='', encoding='utf-8') as csv_handle:
-    writer = csv.DictWriter(csv_handle, fieldnames=['timestamp', 'section', 'python_s', 'robodk_s', 'delta_s'])
+    writer = csv.DictWriter(csv_handle, fieldnames=['timestamp', 'section', 'python_s', 'robodk_s', 'delta_s', 'r1_cycles', 'r2_cycles'])
     if not file_exists:
       writer.writeheader()
     writer.writerows(rows)
@@ -1030,11 +1123,18 @@ if run_ops_sequences and RUN_NOK_SEQUENCE and STRICT_NOK_REQUIRED and not sequen
 
 try:
   section_times = {}
+  section_times_lock = threading.Lock()
+  r1_completed_cycles = 0
   r2_sequence_state = {
     'thread': None,
     'error': None,
     'dispatched_cycles': 0,
+    'requested_cycles': 0,
+    'started_cycles': 0,
     'completed_cycles': 0,
+    'op70_busy': False,
+    'current_op_name': None,
+    'state_lock': threading.Lock(),
   }
   total_robodk_start = get_robodk_sim_time(RDK)
   if MONITOR_ONLY_ACTIVE_OP30_FRAME:
@@ -1106,6 +1206,7 @@ try:
     cycle_number = 0
     while True:
       cycle_number = cycle_number + 1
+      r1_completed_cycles = cycle_number
       print(f"\n=== Ciclo R1 #{cycle_number} ===")
 
       #############################Movimientos Robot 1
@@ -1133,20 +1234,21 @@ try:
         robotR1.setSpeed(R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S)
         robotR1.setRounding(0)
 
-        print("Movimientos Robot 1 - Operación Op_10")
-        run_timed_block(
-          'Operación Op_10',
-          RDK,
-          timer,
-          section_times,
-          lambda: (
-            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
-            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_10_Pos_Dentro, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
-            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_X (MoveL)', 'L', RDK_R1_OP_10_Pos_X, R1_OP_10_X_LINEAR_SPEED_MM_S, R1_OP_10_X_JOINT_SPEED_DEG_S),
-            execute_dwell('Op_10 Pos_X', R1_OP_10_X_DWELL_S),
-            execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
-          ),
-        )
+        for op10_pass in (1, 2):
+          print(f"Movimientos Robot 1 - Operación Op_10 (pasada {op10_pass}/2)")
+          run_timed_block(
+            f'Operación Op_10 - ciclo {cycle_number} pasada {op10_pass}',
+            RDK,
+            timer,
+            section_times,
+            lambda: (
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveJ)', 'J', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Dentro (MoveL)', 'L', RDK_R1_OP_10_Pos_Dentro, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_X (MoveL)', 'L', RDK_R1_OP_10_Pos_X, R1_OP_10_X_LINEAR_SPEED_MM_S, R1_OP_10_X_JOINT_SPEED_DEG_S),
+              execute_dwell('Op_10 Pos_X', R1_OP_10_X_DWELL_S),
+              execute_robot_step_with_speed(robotR1, 'R1 -> Op_10_Pos_Afuera (MoveL)', 'L', RDK_R1_OP_10_Pos_Afuera, R1_OP_10_LINEAR_SPEED_MM_S, R1_OP_10_JOINT_SPEED_DEG_S),
+            ),
+          )
       elif RUN_OP_10_SEQUENCE:
         print("Secuencia Op_10 omitida: faltan frame/targets en esta operación.")
 
@@ -1262,17 +1364,20 @@ try:
             raise Exception(f"Error en secuencia R2 desde Op_70: {r2_sequence_state['error']}")
 
           running_thread = r2_sequence_state['thread']
-          if running_thread is not None and running_thread.is_alive():
-            print("R1 llegó a Op_70 y espera: R2 aún ejecuta Op_70.")
+          if running_thread is not None and running_thread.is_alive() and r2_sequence_state.get('op70_busy', False):
+            print("R1 llegó a Op_70 y espera: R2 aún está en zona Op_70.")
             wait_r1_start = timer()
-            while running_thread.is_alive():
+            while running_thread.is_alive() and r2_sequence_state.get('op70_busy', False):
               if r2_sequence_state['error'] is not None:
                 raise Exception(f"Error en secuencia R2 desde Op_70: {r2_sequence_state['error']}")
               if (timer() - wait_r1_start) > OP70_HANDSHAKE_TIMEOUT_S:
                 raise Exception(
-                  "Timeout de control Op_70: R1 esperó a que R2 liberara Op_70."
+                  "Timeout de control Op_70: R1 esperó a que R2 liberara la zona Op_70."
                 )
               time.sleep(OP70_HANDSHAKE_POLL_S)
+
+          running_thread = r2_sequence_state['thread']
+          if running_thread is not None and not running_thread.is_alive():
             r2_sequence_state['thread'] = None
 
           print("Movimientos Robot 1 - Operación Op_70 (controlado)")
@@ -1286,9 +1391,13 @@ try:
             {
               'op_name': 'Op_70',
               'frame': frameR2_OP_70,
+              'frame_name': frameR2_OP_70.Name(),
               'target_afuera': RDK_R2_OP_70_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_70_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_70_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_70_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_70_Pos_X,
+              'target_x_name': RDK_R2_OP_70_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_70_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_70_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_70_X_LINEAR_SPEED_MM_S,
@@ -1298,9 +1407,13 @@ try:
             {
               'op_name': 'Op_80',
               'frame': frameR2_OP_80,
+              'frame_name': frameR2_OP_80.Name(),
               'target_afuera': RDK_R2_OP_80_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_80_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_80_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_80_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_80_Pos_X,
+              'target_x_name': RDK_R2_OP_80_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_80_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_80_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_80_X_LINEAR_SPEED_MM_S,
@@ -1310,9 +1423,13 @@ try:
             {
               'op_name': 'Op_90',
               'frame': frameR2_OP_90,
+              'frame_name': frameR2_OP_90.Name(),
               'target_afuera': RDK_R2_OP_90_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_90_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_90_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_90_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_90_Pos_X,
+              'target_x_name': RDK_R2_OP_90_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_90_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_90_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_90_X_LINEAR_SPEED_MM_S,
@@ -1322,9 +1439,13 @@ try:
             {
               'op_name': 'Op_100',
               'frame': frameR2_OP_100,
+              'frame_name': frameR2_OP_100.Name(),
               'target_afuera': RDK_R2_OP_100_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_100_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_100_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_100_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_100_Pos_X,
+              'target_x_name': RDK_R2_OP_100_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_100_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_100_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_100_X_LINEAR_SPEED_MM_S,
@@ -1334,9 +1455,13 @@ try:
             {
               'op_name': 'Op_110',
               'frame': frameR2_OP_110,
+              'frame_name': frameR2_OP_110.Name(),
               'target_afuera': RDK_R2_OP_110_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_110_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_110_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_110_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_110_Pos_X,
+              'target_x_name': RDK_R2_OP_110_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_110_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_110_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_110_X_LINEAR_SPEED_MM_S,
@@ -1346,9 +1471,13 @@ try:
             {
               'op_name': 'Op_120',
               'frame': frameR2_OP_120,
+              'frame_name': frameR2_OP_120.Name(),
               'target_afuera': RDK_R2_OP_120_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_120_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_120_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_120_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_120_Pos_X,
+              'target_x_name': RDK_R2_OP_120_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_120_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_120_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_120_X_LINEAR_SPEED_MM_S,
@@ -1358,9 +1487,13 @@ try:
             {
               'op_name': 'Op_130',
               'frame': frameR2_OP_130,
+              'frame_name': frameR2_OP_130.Name(),
               'target_afuera': RDK_R2_OP_130_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_130_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_130_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_130_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_130_Pos_X,
+              'target_x_name': RDK_R2_OP_130_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_130_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_130_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_130_X_LINEAR_SPEED_MM_S,
@@ -1370,9 +1503,13 @@ try:
             {
               'op_name': 'Op_140',
               'frame': frameR2_OP_140,
+              'frame_name': frameR2_OP_140.Name(),
               'target_afuera': RDK_R2_OP_140_Pos_Afuera,
+              'target_afuera_name': RDK_R2_OP_140_Pos_Afuera.Name(),
               'target_dentro': RDK_R2_OP_140_Pos_Dentro,
+              'target_dentro_name': RDK_R2_OP_140_Pos_Dentro.Name(),
               'target_x': RDK_R2_OP_140_Pos_X,
+              'target_x_name': RDK_R2_OP_140_Pos_X.Name(),
               'linear_speed_mm_s': R2_OP_140_LINEAR_SPEED_MM_S,
               'joint_speed_deg_s': R2_OP_140_JOINT_SPEED_DEG_S,
               'x_linear_speed_mm_s': R2_OP_140_X_LINEAR_SPEED_MM_S,
@@ -1386,9 +1523,13 @@ try:
               r2_operation_sequence.append({
                 'op_name': 'Nok',
                 'frame': frameR2_NOK,
+                'frame_name': frameR2_NOK.Name(),
                 'target_afuera': RDK_R2_NOK_Pos_Afuera,
+                'target_afuera_name': RDK_R2_NOK_Pos_Afuera.Name(),
                 'target_dentro': RDK_R2_NOK_Pos_Dentro,
+                'target_dentro_name': RDK_R2_NOK_Pos_Dentro.Name(),
                 'target_x': RDK_R2_NOK_Pos_X,
+                'target_x_name': RDK_R2_NOK_Pos_X.Name(),
                 'linear_speed_mm_s': R2_NOK_LINEAR_SPEED_MM_S,
                 'joint_speed_deg_s': R2_NOK_JOINT_SPEED_DEG_S,
                 'x_linear_speed_mm_s': R2_NOK_X_LINEAR_SPEED_MM_S,
@@ -1398,31 +1539,50 @@ try:
             else:
               print("Secuencia opcional R2_Nok omitida: faltan frame/targets.")
 
-          r2_sequence_state['dispatched_cycles'] = r2_sequence_state['dispatched_cycles'] + 1
           if RUN_R2_IN_BACKGROUND:
-            print(
-              f"Despachando secuencia R2 desde Op_70 en segundo plano (ciclo {r2_sequence_state['dispatched_cycles']})."
-            )
-            r2_thread = threading.Thread(
-              target=execute_r2_operations_sequence_worker,
-              args=(
-                r2_sequence_state,
-                robotR2,
-                r2_operation_sequence,
-              ),
-              daemon=True,
-            )
-            r2_sequence_state['thread'] = r2_thread
-            r2_thread.start()
+            with r2_sequence_state['state_lock']:
+              queued_cycle = r2_sequence_state.get('requested_cycles', 0) + 1
+              r2_sequence_state['requested_cycles'] = queued_cycle
+              running_thread = r2_sequence_state.get('thread')
+
+            print(f"R2 encola ciclo solicitado desde Op_70 (cola ciclo {queued_cycle}).")
+
+            if running_thread is None or not running_thread.is_alive():
+              print("Iniciando worker de R2 para consumir ciclos en cola.")
+              r2_thread = threading.Thread(
+                target=execute_r2_operations_sequence_worker_background,
+                args=(
+                  r2_sequence_state,
+                  'R2',
+                  r2_operation_sequence,
+                  timer,
+                  section_times,
+                  section_times_lock,
+                ),
+                daemon=True,
+              )
+              with r2_sequence_state['state_lock']:
+                r2_sequence_state['thread'] = r2_thread
+              r2_thread.start()
+            else:
+              print(
+                f"R2 sigue ejecutando ciclo en curso ({r2_sequence_state.get('current_op_name', 'N/D')}). Solicitud en cola registrada."
+              )
           else:
+            next_r2_cycle = r2_sequence_state['dispatched_cycles'] + 1
+            r2_sequence_state['dispatched_cycles'] = next_r2_cycle
             print(
-              f"Ejecutando secuencia R2 desde Op_70 en primer plano (ciclo {r2_sequence_state['dispatched_cycles']})."
+              f"Ejecutando secuencia R2 desde Op_70 en primer plano (ciclo {next_r2_cycle})."
             )
             r2_sequence_state['thread'] = None
             execute_r2_operations_sequence_worker(
               r2_sequence_state,
               robotR2,
               r2_operation_sequence,
+              timer,
+              section_times,
+              section_times_lock,
+              next_r2_cycle,
             )
         else:
           if RUN_R2_SEQUENCE_FROM_OP70:
@@ -1493,6 +1653,22 @@ try:
     if r2_sequence_state.get('error') is not None:
       raise Exception(f"Error en secuencia R2 desde Op_70: {r2_sequence_state['error']}")
 
+  if run_ops_sequences:
+    run_timed_block(
+      'Retorno Home R1',
+      RDK,
+      timer,
+      section_times,
+      lambda: move_robot_to_home(robotR1, 'R1', RDK_R1_Home_General),
+    )
+    run_timed_block(
+      'Retorno Home R2',
+      RDK,
+      timer,
+      section_times,
+      lambda: move_robot_to_home(robotR2, 'R2', RDK_R2_Home_General),
+    )
+
   print(f"Juntas finales R1: {robotR1.Joints().list()}")
   print(f"Juntas finales R2: {robotR2.Joints().list()}")
 
@@ -1511,9 +1687,10 @@ try:
     total_robodk_seconds = total_robodk_end - total_robodk_start
 
   current_total_python = timer() - start_time
-  print_timing_summary(section_times, current_total_python, total_robodk_seconds)
+  r2_completed_cycles = r2_sequence_state.get('completed_cycles', 0)
+  print_timing_summary(section_times, current_total_python, total_robodk_seconds, r1_completed_cycles, r2_completed_cycles)
   if EXPORT_TIMES_CSV:
-    export_timing_summary_csv(section_times, current_total_python, total_robodk_seconds, TIMES_CSV_FILE)
+    export_timing_summary_csv(section_times, current_total_python, total_robodk_seconds, TIMES_CSV_FILE, r1_completed_cycles, r2_completed_cycles)
 except Exception as error:
   print(f"Error en comunicación/ejecución con RoboDK: {error}")
   raise
