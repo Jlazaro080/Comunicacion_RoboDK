@@ -1,0 +1,9 @@
+operation_name,robot,priority,work_time_s,input_parts,output_parts,passes,requires_r2_free,frames,speeds_linear_mm_s,speeds_joint_deg_s
+Op_10,R1,2,1.5,1,1,2,False,"R1_Op_10|R1_Op_10_Pos_Afuera|R1_Op_10_Pos_Dentro|R1_Op_10_Pos_X",500,350
+Op_20,R1,3,2.5,1,1,1,False,"R1_Op_20|R1_Op_20_Pos_Afuera|R1_Op_20_Pos_Dentro|R1_Op_20_Pos_X",500,350
+Op_30_A,R1,4,2.0,1,1,1,False,"R1_Op_30_A|R1_Op_30_A_Pos_Afuera|R1_Op_30_A_Pos_Dentro|R1_Op_30_A_Pos_X",500,350
+Op_60,R1,3,1.8,1,1,1,False,"R1_Op_60|R1_Op_60_Pos_Afuera|R1_Op_60_Pos_Dentro|R1_Op_60_Pos_X",500,350
+Op_70,R1,5,1.5,1,2,1,False,"R1_Op_70|R1_Op_70_Pos_Afuera|R1_Op_70_Pos_Dentro|R1_Op_70_Pos_X",500,350
+Op_70,R2,5,2.0,1,1,1,False,"R2_Op_70|R2_Op_70_Pos_Afuera|R2_Op_70_Pos_Dentro|R2_Op_70_Pos_X",500,350
+Op_80,R2,4,1.2,1,1,1,False,"R2_Op_80|R2_Op_80_Pos_Afuera|R2_Op_80_Pos_Dentro|R2_Op_80_Pos_X",500,350
+Op_90,R2,3,1.5,1,1,1,False,"R2_Op_90|R2_Op_90_Pos_Afuera|R2_Op_90_Pos_Dentro|R2_Op_90_Pos_X",500,350
