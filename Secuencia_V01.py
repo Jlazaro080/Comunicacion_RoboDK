@@ -602,53 +602,102 @@ def R2_Op_140():
   )
 
 
+# Crea funciones de Pick and Place para cada operación, por ejemplo:
+# Pick OP 00 and place in OP 10
+
+def R1_pick_and_place_op_00_to_10():
+  R1_Op_00()
+  R1_Op_10()
+
+def R1_pick_and_place_op_10_to_20():
+  R1_Op_10()
+  R1_Op_20()
+
+def R1_pick_and_place_op_20_to_30_A():
+  R1_Op_20()
+  R1_Op_30_A()
+
+def R1_pick_and_place_op_20_to_30_B():
+  R1_Op_20()
+  R1_Op_30_B()
+
+def R1_pick_and_place_op_30_A_to_60():
+  R1_Op_30_A()
+  R1_Op_60()
+
+def R1_pick_and_place_op_30_B_to_60():
+  R1_Op_30_B()
+  R1_Op_60()
+
+def R1_pick_and_place_op_60_to_70():
+  R1_Op_60()
+  R1_Op_70()
+
+
+def R2_pick_and_place_op_70_to_80():
+  R2_Op_70()
+  R2_Op_80()
+
+def R2_pick_and_place_op_80_to_90():
+  R2_Op_80()
+  R2_Op_90()
+
+def R2_pick_and_place_op_90_to_100():
+  R2_Op_90()
+  R2_Op_100()
+
+def R2_pick_and_place_op_100_to_110():
+  R2_Op_100()
+  R2_Op_110()
+
+def R2_pick_and_place_op_110_to_120():
+  R2_Op_110()
+  R2_Op_120()
+
+def R2_pick_and_place_op_120_to_130():
+  R2_Op_120()
+  R2_Op_130()
+
+def R2_pick_and_place_op_130_to_140():
+  R2_Op_130()
+  R2_Op_140()
+
+
+
+
+print("Ejecutando pick and place OP 00 to OP 10")
+R1_pick_and_place_op_00_to_10()
+print("Ejecutando pick and place OP 10 to OP 20")
+R1_pick_and_place_op_10_to_20()  
+print("Ejecutando pick and place OP 20 to OP 30 A")
+R1_pick_and_place_op_20_to_30_A()
+#print("Ejecutando pick and place OP 20 to OP 30 B")
+#R1_pick_and_place_op_20_to_30_B()
+print("Ejecutando pick and place OP 30 A to OP 60")
+R1_pick_and_place_op_30_A_to_60()
+#print("Ejecutando pick and place OP 30 B to OP 60")
+#R1_pick_and_place_op_30_B_to_60()
+print("Ejecutando pick  and place OP 60 to OP 70")
+R1_pick_and_place_op_60_to_70() 
+print("Ejecutando pick and place OP 70 to OP 80")
+R2_pick_and_place_op_70_to_80() 
+print("Ejecutando pick and place OP 80 to OP 90")
+R2_pick_and_place_op_80_to_90()
+print("Ejecutando pick and place OP 90 to OP 100")
+R2_pick_and_place_op_90_to_100()  
+print("Ejecutando pick and place OP 100 to OP 110")
+R2_pick_and_place_op_100_to_110() 
+print("Ejecutando pick and place OP 110 to OP 120")
+R2_pick_and_place_op_110_to_120() 
+print("Ejecutando pick and place OP 120 to OP 130")
+R2_pick_and_place_op_120_to_130()
+print("Ejecutando pick and place OP 130 to OP 140")
+R2_pick_and_place_op_130_to_140()
 
 
 
 
 
-
-
-
-
-
-print("----- Ejecutando OP 00 -----")
-R1_Op_00()
-print("----- Ejecutando OP 10 -----")
-R1_Op_10()
-print("----- Ejecutando OP 10 -----")
-R1_Op_10()
-print("----- Ejecutando OP 20 -----")
-R1_Op_20()
-print("----- Ejecutando OP 20 -----")
-R1_Op_20()
-print("----- Ejecutando OP 30_A -----")
-R1_Op_30_A()
-print("----- Ejecutando OP 30_A -----")
-R1_Op_30_A()
-print("----- Ejecutando OP 60 -----")
-R1_Op_60()
-print("----- Ejecutando OP 60 -----")
-R1_Op_60()
-print("----- Ejecutando OP 70 -----")
-R1_Op_70()
-
-print("----- Ejecutando R2 OP 70 -----")
-R2_Op_70()
-print("----- Ejecutando R2 OP 80 -----")
-R2_Op_80()
-print("----- Ejecutando R2 OP 90 -----")
-R2_Op_90()
-print("----- Ejecutando R2 OP 100 -----")
-R2_Op_100()
-print("----- Ejecutando R2 OP 110 -----")
-R2_Op_110()
-print("----- Ejecutando R2 OP 120 -----")
-R2_Op_120()
-print("----- Ejecutando R2 OP 130 -----")
-R2_Op_130()
-print("----- Ejecutando R2 OP 140 -----")
-R2_Op_140()
 
 end_time=timer()
 print(f"Tiempo de ejecucion: {end_time - start_time:.6f}segundos")
