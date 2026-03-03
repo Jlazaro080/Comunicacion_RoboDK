@@ -609,6 +609,10 @@ def R1_pick_and_place_op_00_to_10():
   R1_Op_00()
   R1_Op_10()
 
+def R1_pick_and_place_op_10_to_10():
+  R1_Op_10()
+  R1_Op_10()
+  
 def R1_pick_and_place_op_10_to_20():
   R1_Op_10()
   R1_Op_20()
