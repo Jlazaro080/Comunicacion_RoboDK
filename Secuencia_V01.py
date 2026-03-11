@@ -5,16 +5,22 @@
 # Note: It is not required to keep a copy of this file, your Python script is saved with your RDK project
 
 # You can also use the new version of the API:
-from robodk import robolink    # RoboDK API
-from robodk import robomath    # Robot toolbox
-RDK = robolink.Robolink()
-
-# Forward and backwards compatible use of the RoboDK API:
-# Remove these 2 lines to follow python programming guidelines
-from robodk import *      # RoboDK API
-from robolink import *    # Robot toolbox
-import time
 import sys
+import time
+
+try:
+  from robodk.robolink import (
+    ITEM_TYPE_FRAME,
+    ITEM_TYPE_ROBOT,
+    ITEM_TYPE_TARGET,
+    Robolink,
+    pause,
+  )
+except ImportError as exc:
+  raise ImportError(
+    "No se pudo importar la API de RoboDK. Instala 'robodk' con `pip install robodk` "
+    "o ejecuta el script desde el entorno de Python integrado de RoboDK."
+  ) from exc
 
 
 if sys.gettrace() is None:
@@ -215,11 +221,17 @@ RDK_R1_Op_00_Pos_Dentro = get_required_item('R1_Op_00_Pos_Dentro')
 RDK_R1_Op_00_Pos_X = get_required_item('R1_Op_00_Pos_X')
 RDK_R1_Op_00_Pos_Afuera = get_required_item('R1_Op_00_Pos_Afuera')
 
-#Posiones de Robot 1 operacion 10
-RDK_R1_Op_10_Frame = get_required_item('R1_Op_10', ITEM_TYPE_FRAME)
-RDK_R1_Op_10_Pos_Dentro = get_required_item('R1_Op_10_Pos_Dentro')
-RDK_R1_Op_10_Pos_X = get_required_item('R1_Op_10_Pos_X')
-RDK_R1_Op_10_Pos_Afuera = get_required_item('R1_Op_10_Pos_Afuera')
+#Posiones de Robot 1 operacion 10A
+RDK_R1_Op_10_A_Frame = get_required_item('R1_Op_10_A', ITEM_TYPE_FRAME)
+RDK_R1_Op_10_A_Pos_Dentro = get_required_item('R1_Op_10_A_Pos_Dentro')
+RDK_R1_Op_10_A_Pos_X = get_required_item('R1_Op_10_A_Pos_X')
+RDK_R1_Op_10_A_Pos_Afuera = get_required_item('R1_Op_10_A_Pos_Afuera')
+
+#Posiones de Robot 1 operacion 10B
+RDK_R1_Op_10_B_Frame = get_required_item('R1_Op_10_B', ITEM_TYPE_FRAME)
+RDK_R1_Op_10_B_Pos_Dentro = get_required_item('R1_Op_10_B_Pos_Dentro')
+RDK_R1_Op_10_B_Pos_X = get_required_item('R1_Op_10_B_Pos_X')
+RDK_R1_Op_10_B_Pos_Afuera = get_required_item('R1_Op_10_B_Pos_Afuera')
 
 #Posiones de Robot 1 operacion 20
 RDK_R1_Op_20_Frame = get_required_item('R1_Op_20', ITEM_TYPE_FRAME)
@@ -281,11 +293,18 @@ RDK_R2_Op_100_Pos_Dentro = get_required_item('R2_Op_100_Pos_Dentro')
 RDK_R2_Op_100_Pos_X = get_required_item('R2_Op_100_Pos_X')
 RDK_R2_Op_100_Pos_Afuera = get_required_item('R2_Op_100_Pos_Afuera')
 
-#Posiones de Robot 2 operacion 110
-RDK_R2_Op_110_Frame = get_required_item('R2_Op_110', ITEM_TYPE_FRAME)
-RDK_R2_Op_110_Pos_Dentro = get_required_item('R2_Op_110_Pos_Dentro')
-RDK_R2_Op_110_Pos_X = get_required_item('R2_Op_110_Pos_X')
-RDK_R2_Op_110_Pos_Afuera = get_required_item('R2_Op_110_Pos_Afuera')
+#Posiones de Robot 2 operacion 110 A
+RDK_R2_Op_110_A_Frame = get_required_item('R2_Op_110_A', ITEM_TYPE_FRAME)
+RDK_R2_Op_110_A_Pos_Dentro = get_required_item('R2_Op_110_A_Pos_Dentro')
+RDK_R2_Op_110_A_Pos_X = get_required_item('R2_Op_110_A_Pos_X')
+RDK_R2_Op_110_A_Pos_Afuera = get_required_item('R2_Op_110_A_Pos_Afuera')
+
+
+#Posiones de Robot 2 operacion 110 B
+RDK_R2_Op_110_B_Frame = get_required_item('R2_Op_110_B', ITEM_TYPE_FRAME)
+RDK_R2_Op_110_B_Pos_Dentro = get_required_item('R2_Op_110_B_Pos_Dentro')
+RDK_R2_Op_110_B_Pos_X = get_required_item('R2_Op_110_B_Pos_X')
+RDK_R2_Op_110_B_Pos_Afuera = get_required_item('R2_Op_110_B_Pos_Afuera')
 
 #Posiones de Robot 2 operacion 120
 RDK_R2_Op_120_Frame = get_required_item('R2_Op_120', ITEM_TYPE_FRAME)
@@ -345,22 +364,38 @@ def R1_Op_00():
   )
 
 
-def R1_Op_10():
+def R1_Op_10_A():
   run_timed_operation(
-    "R1_Op_10",
+    "R1_Op_10_A",
     lambda: execute_operation_cycle(
       robotR1,
       "R1",
-      RDK_R1_Op_10_Frame,
-      RDK_R1_Op_10_Pos_Afuera,
-      RDK_R1_Op_10_Pos_Dentro,
-      RDK_R1_Op_10_Pos_X,
+      RDK_R1_Op_10_A_Frame,
+      RDK_R1_Op_10_A_Pos_Afuera,
+      RDK_R1_Op_10_A_Pos_Dentro,
+      RDK_R1_Op_10_A_Pos_X,
       R1_OPERATION_SPEEDS,
       R1_OPERATION_TIMES_SEC,
-      "OP_10",
+      "OP_10_A",
     ),
   )
 
+
+def R1_Op_10_B():
+  run_timed_operation(
+    "R1_Op_10_B",
+    lambda: execute_operation_cycle(
+      robotR1,
+      "R1",
+      RDK_R1_Op_10_B_Frame,
+      RDK_R1_Op_10_B_Pos_Afuera,
+      RDK_R1_Op_10_B_Pos_Dentro,
+      RDK_R1_Op_10_B_Pos_X,
+      R1_OPERATION_SPEEDS,
+      R1_OPERATION_TIMES_SEC,
+      "OP_10_B",
+    ),
+  )
 
 def R1_Op_20():
   run_timed_operation(
@@ -534,19 +569,35 @@ def R2_Op_100():
   )
 
 
-def R2_Op_110():
+def R2_Op_110_A():
   run_timed_operation(
-    "R2_Op_110",
+    "R2_Op_110_A",
     lambda: execute_operation_cycle(
       robotR2,
       "R2",
-      RDK_R2_Op_110_Frame,
-      RDK_R2_Op_110_Pos_Afuera,
-      RDK_R2_Op_110_Pos_Dentro,
-      RDK_R2_Op_110_Pos_X,
+      RDK_R2_Op_110_A_Frame,
+      RDK_R2_Op_110_A_Pos_Afuera,
+      RDK_R2_Op_110_A_Pos_Dentro,
+      RDK_R2_Op_110_A_Pos_X,
       R2_OPERATION_SPEEDS,
       R2_OPERATION_TIMES_SEC,
-      "OP_110",
+      "OP_110_A",
+    ),
+  )
+
+def R2_Op_110_B():
+  run_timed_operation(
+    "R2_Op_110_B",
+    lambda: execute_operation_cycle(
+      robotR2,
+      "R2",
+      RDK_R2_Op_110_B_Frame,
+      RDK_R2_Op_110_B_Pos_Afuera,
+      RDK_R2_Op_110_B_Pos_Dentro,
+      RDK_R2_Op_110_B_Pos_X,
+      R2_OPERATION_SPEEDS,
+      R2_OPERATION_TIMES_SEC,
+      "OP_110_B",
     ),
   )
 
@@ -605,16 +656,20 @@ def R2_Op_140():
 # Crea funciones de Pick and Place para cada operación, por ejemplo:
 # Pick OP 00 and place in OP 10
 
-def R1_pick_and_place_op_00_to_10():
+def R1_pick_and_place_op_00_to_10_A():
   R1_Op_00()
-  R1_Op_10()
+  R1_Op_10_A()
 
-def R1_pick_and_place_op_10_to_10():
-  R1_Op_10()
-  R1_Op_10()
-  
-def R1_pick_and_place_op_10_to_20():
-  R1_Op_10()
+
+def R1_pick_and_place_op_10_A_to_10_B():
+  R1_Op_10_A()
+  R1_Op_10_B()
+
+
+
+
+def R1_pick_and_place_op_10_B_to_20():
+  R1_Op_10_B()
   R1_Op_20()
 
 def R1_pick_and_place_op_20_to_30_A():
@@ -650,12 +705,17 @@ def R2_pick_and_place_op_90_to_100():
   R2_Op_90()
   R2_Op_100()
 
-def R2_pick_and_place_op_100_to_110():
+def R2_pick_and_place_op_100_to_110_A():
   R2_Op_100()
-  R2_Op_110()
+  R2_Op_110_A()
 
-def R2_pick_and_place_op_110_to_120():
-  R2_Op_110()
+def R2_pick_and_place_op_110_A_to_110_B():
+  R2_Op_110_A()
+  R2_Op_110_B() 
+
+
+def R2_pick_and_place_op_110_B_to_120():
+  R2_Op_110_B()
   R2_Op_120()
 
 def R2_pick_and_place_op_120_to_130():
@@ -670,29 +730,38 @@ def R2_pick_and_place_op_130_to_140():
 
 
 print("Ejecutando pick and place OP 00 to OP 10")
-R1_pick_and_place_op_00_to_10()
-print("Ejecutando pick and place OP 10 to OP 20")
-R1_pick_and_place_op_10_to_20()  
+R1_pick_and_place_op_00_to_10_A()
+
+print("Ejecutando pick and place OP 10 A to OP 10 B")
+R1_pick_and_place_op_10_A_to_10_B()
+
+
+print("Ejecutando pick and place OP 10 B to OP 20")
+R1_pick_and_place_op_10_B_to_20()  
+
 print("Ejecutando pick and place OP 20 to OP 30 A")
 R1_pick_and_place_op_20_to_30_A()
+
 #print("Ejecutando pick and place OP 20 to OP 30 B")
 #R1_pick_and_place_op_20_to_30_B()
 print("Ejecutando pick and place OP 30 A to OP 60")
 R1_pick_and_place_op_30_A_to_60()
+
 #print("Ejecutando pick and place OP 30 B to OP 60")
 #R1_pick_and_place_op_30_B_to_60()
 print("Ejecutando pick  and place OP 60 to OP 70")
 R1_pick_and_place_op_60_to_70() 
+
 print("Ejecutando pick and place OP 70 to OP 80")
 R2_pick_and_place_op_70_to_80() 
 print("Ejecutando pick and place OP 80 to OP 90")
 R2_pick_and_place_op_80_to_90()
 print("Ejecutando pick and place OP 90 to OP 100")
 R2_pick_and_place_op_90_to_100()  
-print("Ejecutando pick and place OP 100 to OP 110")
-R2_pick_and_place_op_100_to_110() 
-print("Ejecutando pick and place OP 110 to OP 120")
-R2_pick_and_place_op_110_to_120() 
+print("Ejecutando pick and place OP 100 to OP 110 A")
+R2_pick_and_place_op_110_A_to_110_B() 
+print("Ejecutando pick and place OP 110 B to OP 120")
+R2_pick_and_place_op_110_B_to_120() 
 print("Ejecutando pick and place OP 120 to OP 130")
 R2_pick_and_place_op_120_to_130()
 print("Ejecutando pick and place OP 130 to OP 140")
