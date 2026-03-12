@@ -14,8 +14,8 @@ try:
     ITEM_TYPE_ROBOT,
     ITEM_TYPE_TARGET,
     Robolink,
-    pause,
   )
+  from robodk.robomath import pause
 except ImportError as exc:
   raise ImportError(
     "No se pudo importar la API de RoboDK. Instala 'robodk' con `pip install robodk` "
@@ -48,6 +48,51 @@ def get_required_item_any(names, item_type=ITEM_TYPE_TARGET):
     if item.Valid():
       return item
   raise Exception(f"No se encontro ninguno de los items requeridos: {names}")
+
+
+def get_optional_item_any(names, item_type=ITEM_TYPE_TARGET):
+  for name in names:
+    item = RDK.Item(name, item_type)
+    if item.Valid():
+      return item
+  return None
+
+
+def get_available_items(names, item_type=ITEM_TYPE_TARGET):
+  items = []
+  for name in names:
+    item = RDK.Item(name, item_type)
+    if item.Valid():
+      items.append(item)
+  if not items:
+    raise Exception(f"No se encontro ninguno de los items requeridos: {names}")
+  return items
+
+
+def get_home_targets(robot_tag, preferred_names):
+  # Prefer explicit names, then append any target containing both robot tag and "home".
+  targets = []
+  seen_names = set()
+
+  for name in preferred_names:
+    item = RDK.Item(name, ITEM_TYPE_TARGET)
+    if item.Valid() and name not in seen_names:
+      targets.append(item)
+      seen_names.add(name)
+
+  for item in RDK.ItemList(filter=ITEM_TYPE_TARGET):
+    name = item.Name()
+    lname = name.lower()
+    if robot_tag.lower() in lname and "home" in lname and name not in seen_names:
+      targets.append(item)
+      seen_names.add(name)
+
+  if not targets:
+    raise Exception(
+      f"No se encontraron targets Home para {robot_tag}."
+    )
+
+  return targets
 
 #get the robot by name:
 robotR1 = get_required_item('R1', ITEM_TYPE_ROBOT)
@@ -167,34 +212,113 @@ def hold_process_time(seconds, robot_name, op_key):
     time.sleep(seconds)
 
 
+def wait_robot_motion(robot, robot_name, step_name, timeout_sec=120.0, poll_sec=0.1):
+  start = timer()
+  while robot.Busy():
+    if timer() - start > timeout_sec:
+      robot.Stop()
+      raise TimeoutError(
+        f"Movimiento {step_name} de {robot_name} excedio {timeout_sec:.1f}s"
+      )
+    time.sleep(poll_sec)
+
+
+def move_with_timeout(robot, robot_name, move_kind, target, step_name, timeout_sec=120.0):
+  if move_kind == "J":
+    robot.MoveJ(target, False)
+  else:
+    robot.MoveL(target, False)
+  wait_robot_motion(robot, robot_name, step_name, timeout_sec=timeout_sec)
+
+
+def move_home_with_timeout(robot, robot_name, targets, base_frame=None, timeout_sec=45.0, poll_sec=0.1):
+  target_list = targets if isinstance(targets, list) else [targets]
+  print(f"Inicio Home General {robot_name}")
+
+  if base_frame is not None:
+    try:
+      robot.setPoseFrame(base_frame)
+      print(f"Frame base {robot_name}: {base_frame.Name()}")
+    except Exception as exc:
+      print(f"ADVERTENCIA: No se pudo configurar frame base de {robot_name}: {exc}")
+
+  for idx, target in enumerate(target_list, start=1):
+    target_name = target.Name()
+    try:
+      if len(target_list) > 1:
+        print(f"Intento Home {robot_name} {idx}/{len(target_list)} con target: {target_name}")
+
+      # Use non-blocking motion and poll Busy() to avoid indefinite WaitMove() hangs.
+      robot.MoveJ(target, False)
+      start = timer()
+      while robot.Busy():
+        if timer() - start > timeout_sec:
+          robot.Stop()
+          raise TimeoutError(
+            f"Home {robot_name} excedio {timeout_sec:.1f}s en target {target_name}"
+          )
+        time.sleep(poll_sec)
+
+      print(f"Fin de Home Robot {robot_name} con target: {target_name}")
+      return True
+    except Exception as exc:
+      print(f"ADVERTENCIA: Fallo Home {robot_name} con target {target_name}: {exc}")
+
+      # Fallback: try the target joint values directly with the same robot.
+      try:
+        home_joints = target.Joints().tolist()
+        print(f"Intentando Home {robot_name} por juntas de target: {target_name}")
+        robot.MoveJ(home_joints, False)
+        start = timer()
+        while robot.Busy():
+          if timer() - start > timeout_sec:
+            robot.Stop()
+            raise TimeoutError(
+              f"Home por juntas {robot_name} excedio {timeout_sec:.1f}s"
+            )
+          time.sleep(poll_sec)
+
+        print(f"Fin de Home Robot {robot_name} por juntas de target: {target_name}")
+        return True
+      except Exception as joints_exc:
+        print(
+          f"ADVERTENCIA: Fallo Home {robot_name} por juntas ({target_name}): {joints_exc}"
+        )
+
+  print(f"ADVERTENCIA: No se pudo completar Home {robot_name} con ningun target disponible.")
+  return False
+
+
 def execute_operation_cycle(robot, robot_name, frame, pos_afuera, pos_dentro, pos_x, speed_table, time_table, op_key):
-  op_speed = get_op_speed_cfg(speed_table, op_key)
-  op_time_sec = get_operation_time_sec(time_table, op_key)
-  robot.setPoseFrame(frame)
+  try:
+    op_speed = get_op_speed_cfg(speed_table, op_key)
+    op_time_sec = get_operation_time_sec(time_table, op_key)
+    robot.setPoseFrame(frame)
 
-  set_speed_from_cfg(robot, op_speed["travel"])
-  robot.MoveJ(pos_afuera)
-  robot.WaitMove()
+    set_speed_from_cfg(robot, op_speed["travel"])
+    move_with_timeout(robot, robot_name, "J", pos_afuera, f"{op_key}-MoveJ-Afuera")
 
-  set_speed_from_cfg(robot, op_speed["process"])
-  robot.MoveL(pos_dentro)
-  robot.WaitMove()
-  robot.MoveL(pos_x)
-  robot.WaitMove()
+    set_speed_from_cfg(robot, op_speed["process"])
+    move_with_timeout(robot, robot_name, "L", pos_dentro, f"{op_key}-MoveL-Dentro")
+    move_with_timeout(robot, robot_name, "L", pos_x, f"{op_key}-MoveL-X")
 
-  hold_process_time(op_time_sec, robot_name, op_key)
+    hold_process_time(op_time_sec, robot_name, op_key)
 
-  set_speed_from_cfg(robot, op_speed["travel"])
-  robot.MoveL(pos_afuera)
-  robot.WaitMove()
+    set_speed_from_cfg(robot, op_speed["travel"])
+    move_with_timeout(robot, robot_name, "L", pos_afuera, f"{op_key}-MoveL-Salida")
+    return True
+  except Exception as exc:
+    print(f"ADVERTENCIA: Operacion {robot_name} {op_key} interrumpida: {exc}")
+    return False
 
 
 def run_timed_operation(op_name, operation_fn):
   print(f"Inicio de {op_name}")
   op_start = timer()
-  operation_fn()
+  ok = operation_fn()
   elapsed = timer() - op_start
-  print(f"Fin de {op_name} | Duracion real: {elapsed:.3f} s")
+  status = "OK" if ok else "WARN"
+  print(f"Fin de {op_name} [{status}] | Duracion real: {elapsed:.3f} s")
 
 # get the Targets:
 #frame = RDK.Item('Frame_Pieza', ITEM_TYPE_FRAME)
@@ -212,8 +336,10 @@ def run_timed_operation(op_name, operation_fn):
 
 #Posicion HOME
 #robotR1.setPoseFrame(frameBase.Pose())
-RDK_R1_Home_General = get_required_item_any(['R1_Home_Gral', 'R1_Home_gral'])
-RDK_R2_Home_General = get_required_item_any(['R2_Home_Gral', 'R2_Home_gral'])
+RDK_R1_Home_General_Targets = get_home_targets('R1', ['R1_Home_Gral', 'R1_Home_gral'])
+RDK_R2_Home_General_Targets = get_home_targets('R2', ['R2_Home_Gral', 'R2_Home_gral'])
+RDK_R1_Base_Frame = get_optional_item_any(['R1_Base'], ITEM_TYPE_FRAME)
+RDK_R2_Base_Frame = get_optional_item_any(['R2_Base', 'R2_BAse'], ITEM_TYPE_FRAME)
 
 #Posiones de Robot 1 operacion 00
 RDK_R1_Op_00_Frame = get_required_item('R1_Op_00', ITEM_TYPE_FRAME)
@@ -328,16 +454,10 @@ RDK_R2_Op_140_Pos_Afuera = get_required_item('R2_Op_140_Pos_Afuera')
 #move posicion Home Robot 1
 # robotR1.setSpeed(400,50)
 
-print("Inicio Home General R1")
-robotR1.MoveJ(RDK_R1_Home_General)
-robotR1.WaitMove()
-print("Fin de Home Robot 1")
+move_home_with_timeout(robotR1, "R1", RDK_R1_Home_General_Targets, RDK_R1_Base_Frame)
 
 #move posicion Home Robot 2
-print("Inicio Home General R2")
-robotR2.MoveJ(RDK_R2_Home_General)
-robotR2.WaitMove()
-print("Fin de Home Robot 2")
+move_home_with_timeout(robotR2, "R2", RDK_R2_Home_General_Targets, RDK_R2_Base_Frame)
 
 
 
@@ -768,7 +888,13 @@ print("Ejecutando pick and place OP 130 to OP 140")
 R2_pick_and_place_op_130_to_140()
 
 
+#move posicion Home Robot 1
+# robotR1.setSpeed(400,50)
 
+move_home_with_timeout(robotR1, "R1", RDK_R1_Home_General_Targets, RDK_R1_Base_Frame)
+
+#move posicion Home Robot 2
+move_home_with_timeout(robotR2, "R2", RDK_R2_Home_General_Targets, RDK_R2_Base_Frame)
 
 
 
