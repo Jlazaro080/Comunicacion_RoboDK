@@ -180,6 +180,10 @@ R2_OPERATION_TIMES_SEC = {
   "OP_140": 1.0,
 }
 
+# Si esta opcion esta activa, todos los desplazamientos del ciclo de operacion
+# se ejecutan con MoveL para priorizar trayectorias lineales visibles.
+FORCE_LINEAR_PROCESS_TRAJECTORY = True
+
 
 def set_speed_from_cfg(robot, speed_cfg):
   try:
@@ -229,6 +233,34 @@ def move_with_timeout(robot, robot_name, move_kind, target, step_name, timeout_s
   else:
     robot.MoveL(target, False)
   wait_robot_motion(robot, robot_name, step_name, timeout_sec=timeout_sec)
+
+
+def format_exception(exc):
+  message = str(exc).strip()
+  if message:
+    return f"{type(exc).__name__}: {message}"
+  return f"{type(exc).__name__}: {repr(exc)}"
+
+
+def move_with_fallback(robot, robot_name, primary_kind, fallback_kind, target, step_name, timeout_sec=120.0):
+  try:
+    move_with_timeout(robot, robot_name, primary_kind, target, step_name, timeout_sec=timeout_sec)
+  except Exception as primary_exc:
+    if fallback_kind is None or fallback_kind == primary_kind:
+      raise
+
+    print(
+      f"ADVERTENCIA: {step_name} fallo en Move{primary_kind}. "
+      f"Reintentando Move{fallback_kind}. Detalle: {format_exception(primary_exc)}"
+    )
+    move_with_timeout(
+      robot,
+      robot_name,
+      fallback_kind,
+      target,
+      f"{step_name}-Fallback-{fallback_kind}",
+      timeout_sec=timeout_sec,
+    )
 
 
 def move_home_with_timeout(robot, robot_name, targets, base_frame=None, timeout_sec=45.0, poll_sec=0.1):
@@ -295,8 +327,18 @@ def execute_operation_cycle(robot, robot_name, frame, pos_afuera, pos_dentro, po
     op_time_sec = get_operation_time_sec(time_table, op_key)
     robot.setPoseFrame(frame)
 
+    move_to_afuera = "L" if FORCE_LINEAR_PROCESS_TRAJECTORY else "J"
+    move_to_afuera_fallback = "J" if move_to_afuera == "L" else None
+
     set_speed_from_cfg(robot, op_speed["travel"])
-    move_with_timeout(robot, robot_name, "J", pos_afuera, f"{op_key}-MoveJ-Afuera")
+    move_with_fallback(
+      robot,
+      robot_name,
+      move_to_afuera,
+      move_to_afuera_fallback,
+      pos_afuera,
+      f"{op_key}-Move{move_to_afuera}-Afuera",
+    )
 
     set_speed_from_cfg(robot, op_speed["process"])
     move_with_timeout(robot, robot_name, "L", pos_dentro, f"{op_key}-MoveL-Dentro")
@@ -305,10 +347,17 @@ def execute_operation_cycle(robot, robot_name, frame, pos_afuera, pos_dentro, po
     hold_process_time(op_time_sec, robot_name, op_key)
 
     set_speed_from_cfg(robot, op_speed["travel"])
-    move_with_timeout(robot, robot_name, "L", pos_afuera, f"{op_key}-MoveL-Salida")
+    move_with_fallback(
+      robot,
+      robot_name,
+      "L",
+      "J",
+      pos_afuera,
+      f"{op_key}-MoveL-Salida",
+    )
     return True
   except Exception as exc:
-    print(f"ADVERTENCIA: Operacion {robot_name} {op_key} interrumpida: {exc}")
+    print(f"ADVERTENCIA: Operacion {robot_name} {op_key} interrumpida: {format_exception(exc)}")
     return False
 
 
