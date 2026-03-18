@@ -166,18 +166,19 @@ R1_OPERATION_TIMES_SEC = {
   "OP_50": 1.0,
   "OP_60": 1.0,
   "OP_70": 1.0,
+  "OP_80": 1.0,
 }
 
 R2_OPERATION_TIMES_SEC = {
   "default": 1.0,
   "OP_70": 1.0,
-  "OP_80": 1.0,
   "OP_90": 1.0,
   "OP_100": 1.0,
   "OP_110": 1.0,
   "OP_120": 1.0,
   "OP_130": 1.0,
   "OP_140": 1.0,
+  "OP_150": 1.0,
 }
 
 # Si esta opcion esta activa, todos los desplazamientos del ciclo de operacion
@@ -446,11 +447,11 @@ RDK_R2_Op_70_Pos_Dentro = get_required_item('R2_Op_70_Pos_Dentro')
 RDK_R2_Op_70_Pos_X = get_required_item('R2_Op_70_Pos_X')
 RDK_R2_Op_70_Pos_Afuera = get_required_item('R2_Op_70_Pos_Afuera')
 
-#Posiones de Robot 2 operacion 80
-RDK_R2_Op_80_Frame = get_required_item('R2_Op_80', ITEM_TYPE_FRAME)
-RDK_R2_Op_80_Pos_Dentro = get_required_item('R2_Op_80_Pos_Dentro')
-RDK_R2_Op_80_Pos_X = get_required_item('R2_Op_80_Pos_X')
-RDK_R2_Op_80_Pos_Afuera = get_required_item('R2_Op_80_Pos_Afuera')
+#Posiones de Robot 1 operacion 80
+RDK_R1_Op_80_Frame = get_required_item('R1_Op_80', ITEM_TYPE_FRAME)
+RDK_R1_Op_80_Pos_Dentro = get_required_item('R1_Op_80_Pos_Dentro')
+RDK_R1_Op_80_Pos_X = get_required_item('R1_Op_80_Pos_X')
+RDK_R1_Op_80_Pos_Afuera = get_required_item('R1_Op_80_Pos_Afuera')
 
 #Posiones de Robot 2 operacion 90
 RDK_R2_Op_90_Frame = get_required_item('R2_Op_90', ITEM_TYPE_FRAME)
