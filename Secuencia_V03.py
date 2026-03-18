@@ -878,10 +878,8 @@ def R2_pick_and_place_op_140_to_150():
 
 
 
-
 print("Ejecutando pick and place OP 00 to OP 10")
 R1_pick_and_place_op_00_to_10()
-
 
 
 print("Ejecutando pick and place OP 10 B to OP 20")
