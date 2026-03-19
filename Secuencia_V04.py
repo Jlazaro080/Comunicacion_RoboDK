@@ -243,6 +243,12 @@ def format_exception(exc):
   return f"{type(exc).__name__}: {repr(exc)}"
 
 
+INDICATOR_NAME_OVERRIDES = {
+  ("R2", "OP_70"): ("IND_Op_70_Libre_R2", "IND_Op_70_Ocupada_R2"),
+}
+_MISSING_INDICATOR_WARNINGS = set()
+
+
 def set_station_indicator(op_key, ocupada: bool, robot_name=None):
   """Muestra el indicador Libre u Ocupada de una estacion si existe en la escena.
 
@@ -250,6 +256,9 @@ def set_station_indicator(op_key, ocupada: bool, robot_name=None):
   y si no existe, usa formato general: Ind_OP_20_Libre/Ocupada.
   """
   candidate_pairs = []
+  override_pair = INDICATOR_NAME_OVERRIDES.get((robot_name, op_key))
+  if override_pair:
+    candidate_pairs.append(override_pair)
   if robot_name:
     candidate_pairs.append((
       f"Ind_{robot_name}_{op_key}_Libre",
@@ -271,8 +280,19 @@ def set_station_indicator(op_key, ocupada: bool, robot_name=None):
       ind_libre.setVisible(not ocupada)
     if ind_ocupada.Valid():
       ind_ocupada.setVisible(ocupada)
+    if override_pair and (name_libre, name_ocupada) == override_pair:
+      estado = "Ocupada" if ocupada else "Libre"
+      print(f"Indicador {robot_name} {op_key}: usando {name_libre}/{name_ocupada} -> {estado}")
     RDK.Render()
     return
+
+  missing_key = (robot_name, op_key)
+  if missing_key not in _MISSING_INDICATOR_WARNINGS:
+    _MISSING_INDICATOR_WARNINGS.add(missing_key)
+    print(
+      f"ADVERTENCIA: No se encontraron indicadores para {robot_name} {op_key}. "
+      f"Nombres probados: {candidate_pairs}"
+    )
 
 
 def initialize_station_indicators(stations):
